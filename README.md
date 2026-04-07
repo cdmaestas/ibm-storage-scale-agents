@@ -62,14 +62,18 @@ args = --directory /path/to/scale-mcp-server run scale-mcp-server --transport st
 [logging]
 level = DEBUG
 format = json
-file_path = logs/agent.log
+log_path = logs/agents.log
 max_bytes = 10485760
 backup_count = 5
 ```
 
-## Provisioning Agent
+**Note:** All agents write to a single shared log file (`logs/agents.log`) for easier debugging and log correlation.
+## Available Agents
 
-For a full reference of supported tools, parameters, and example prompts see the [Provisioning Agent README](src/provisioning_agent/README.md).
+| Agent | Description | Documentation |
+|-------|-------------|---------------|
+| Provisioning Agent | Manages IBM Storage Scale filesets, snapshots, and storage operations | [README](src/provisioning_agent/README.md) |
+| ILM Agent | Manages Information Lifecycle Management policies and operations | [README](src/ilm_agent/README.md) |
 
 ## Usage
 
@@ -93,7 +97,7 @@ uv run python main.py
 
 2. Check the transport configuration in [`agents_settings.ini`](config/agents_settings.ini)
 
-3. Review logs in `logs/agent.log` for connection errors
+3. Review the log file (`logs/agents.log`) for connection errors
 
 ### Model Not Found
 

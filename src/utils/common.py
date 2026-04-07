@@ -1,18 +1,25 @@
 """Common utility functions for agent configuration and MCP setup."""
 
 import asyncio
+import base64
 import configparser
 import json
 import logging
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Type
 
 import httpx
 from langchain_core.tools import StructuredTool
+from langchain_ollama import ChatOllama
 from langgraph.types import interrupt
 from pydantic import BaseModel, Field
+
+from src.utils.constants import SEPARATOR_LINE, TOOL_CONFIGS
+
+# Null placeholder strings that LLMs may generate for optional parameters
+NULL_PLACEHOLDERS = ('<nil>', 'null', 'NULL', '<null>', 'nil', '')
 
 # Global semaphore to enforce sequential tool execution
 # This ensures only one tool executes at a time across all tool instances
@@ -31,6 +38,116 @@ def get_tool_execution_semaphore():
     return _TOOL_EXECUTION_SEMAPHORE
 
 
+def decode_policy_contents(base64_content: str) -> str:
+    """Decode base64-encoded policy contents to plain text.
+
+    Args:
+        base64_content: Base64-encoded policy content
+
+    Returns:
+        Decoded plain text policy content
+ 
+    Raises:
+        ValueError: If content is not valid base64 or UTF-8
+    """
+    try:
+        decoded_bytes = base64.b64decode(base64_content, validate=True)
+        return decoded_bytes.decode("utf-8")
+    except Exception as e:
+        raise ValueError(f"Failed to decode policy contents: {str(e)}") from e
+
+
+def process_policy_contents(tool_name: str, filtered_kwargs: dict, logger: logging.Logger) -> None:
+    """Process policy_contents parameter: normalize to base64 encoding for MCP transmission.
+    
+    This is a shared helper for both test_policy and update_policy tools.
+    Modifies filtered_kwargs in place.
+    
+    The decode/encode cycle serves two purposes:
+    1. Normalizes input - accepts both plain text and base64-encoded content
+    2. Ensures consistent base64 encoding for MCP server transmission
+    
+    Args:
+        tool_name: Name of the tool being called
+        filtered_kwargs: Dictionary of tool arguments (modified in place)
+        logger: Logger instance for output
+    """
+    if "policy_contents" not in filtered_kwargs:
+        return
+        
+    raw = filtered_kwargs["policy_contents"]
+    if not isinstance(raw, str):
+        return
+    
+    # Normalize input: if already base64, decode to plain text first
+    # This allows the function to accept both plain text and base64-encoded input
+    try:
+        decoded_bytes = base64.b64decode(raw, validate=True)
+        raw = decoded_bytes.decode("utf-8")
+    except Exception:
+        # Input is not base64-encoded, treating as plain text
+        logger.debug(f"Input for {tool_name} is not base64-encoded, treating as plain text")
+    
+    # Log the decoded policy content before encoding
+    logger.debug(f"Raw policy content for {tool_name} (decoded):")
+    logger.debug(raw)
+    
+    # Always encode to base64 for consistent MCP transmission
+    encoded = base64.b64encode(raw.encode("utf-8")).decode("utf-8")
+    filtered_kwargs["policy_contents"] = encoded
+
+
+def filter_tool_kwargs(kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """Filter out None and LLM-generated placeholder strings for optional parameters.
+    
+    Some LLMs may generate '<nil>', 'null', etc. instead of omitting optional params.
+    
+    Args:
+        kwargs: Dictionary of tool arguments
+        
+    Returns:
+        Filtered dictionary with None and placeholder values removed
+    """
+    filtered = {}
+    for k, v in kwargs.items():
+        if v is None:
+            continue
+        # Skip string placeholders that represent "no value"
+        if isinstance(v, str) and v in NULL_PLACEHOLDERS:
+            continue
+        filtered[k] = v
+    return filtered
+
+
+def create_tool_input_model(tool_name: str, args_config: Dict[str, Any]) -> Type[BaseModel]:
+    """Dynamically create a Pydantic model for a tool's input schema.
+    
+    Args:
+        tool_name: Name of the tool
+        args_config: Dictionary of argument configurations
+        
+    Returns:
+        Dynamically created Pydantic BaseModel class
+    """
+    fields = {}
+    annotations = {}
+    
+    for arg_name, arg_config in args_config.items():
+        arg_type = arg_config["type"]
+        arg_desc = arg_config["description"]
+        is_optional = arg_config.get("optional", False)
+
+        if is_optional:
+            annotations[arg_name] = Optional[arg_type]
+            fields[arg_name] = Field(default=None, description=arg_desc)
+        else:
+            annotations[arg_name] = arg_type
+            fields[arg_name] = Field(description=arg_desc)
+    
+    # Create dynamic Pydantic model with proper annotations and defaults
+    return type(f"{tool_name}_input", (BaseModel,), {"__annotations__": annotations, **fields})
+
+
 def setup_logging(
     log_level: str = "INFO",
     log_file: str = "logs/agent.log",
@@ -39,6 +156,9 @@ def setup_logging(
     backup_count: int = 5,
 ) -> logging.Logger:
     """Setup logging based on configuration.
+    
+    This function is idempotent - calling it multiple times with the same log_file
+    will not create duplicate handlers.
 
     Args:
         log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
@@ -61,46 +181,69 @@ def setup_logging(
 
     root_logger = logging.getLogger()
     root_logger.setLevel(log_level_value)
-    root_logger.handlers.clear()
+    
+    # Only setup handlers once (on first call)
+    if not root_logger.handlers:
+        # Suppress noisy third-party loggers: use the configured level but no lower than WARNING
+        third_party_level = max(log_level_value, logging.WARNING)
+        logging.getLogger("httpx").setLevel(third_party_level)
+        logging.getLogger("httpcore").setLevel(third_party_level)
 
-    # Suppress noisy third-party loggers: use the configured level but no lower than WARNING
-    third_party_level = max(log_level_value, logging.WARNING)
-    logging.getLogger("httpx").setLevel(third_party_level)
-    logging.getLogger("httpcore").setLevel(third_party_level)
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(log_level_value)
+        console_handler.setFormatter(formatter)
+        root_logger.addHandler(console_handler)
 
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(logging.INFO)
-    console_handler.setFormatter(formatter)
-    root_logger.addHandler(console_handler)
+        if log_file:
+            log_path = Path(log_file)
+            log_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if log_file:
-        log_path = Path(log_file)
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-
-        file_handler = RotatingFileHandler(
-            log_file,
-            maxBytes=max_bytes,
-            backupCount=backup_count,
-        )
-        file_handler.setLevel(log_level_value)
-        file_handler.setFormatter(formatter)
-        root_logger.addHandler(file_handler)
+            file_handler = RotatingFileHandler(
+                log_file,
+                maxBytes=max_bytes,
+                backupCount=backup_count,
+            )
+            file_handler.setLevel(log_level_value)
+            file_handler.setFormatter(formatter)
+            root_logger.addHandler(file_handler)
 
     return root_logger
+
+
+def setup_agent_logging(config: configparser.ConfigParser, default_log_path: str) -> None:
+    """Setup logging for an agent from configuration.
+    
+    Uses a shared log file (log_path) for all agents.
+
+    Args:
+        config: ConfigParser instance with agent configuration
+        default_log_path: Default log file path if log_path not found in config
+    """
+    logging_config = config["logging"] if "logging" in config else {}
+    # Use shared log_path for all agents, fall back to default_log_path if not found
+    shared_log_path = logging_config.get("log_path", default_log_path)
+    setup_logging(
+        log_level=logging_config.get("level", "INFO"),
+        log_file=shared_log_path,
+        log_format=logging_config.get("format", "json"),
+        max_bytes=int(logging_config.get("max_bytes", "10485760")),
+        backup_count=int(logging_config.get("backup_count", "5")),
+    )
 
 
 class MCPClient:
     """Client for interacting with MCP server via HTTP."""
 
-    def __init__(self, base_url: str):
+    def __init__(self, base_url: str, timeout: float = 30.0):
         """Initialize MCP client.
 
         Args:
             base_url: Base URL of the MCP server
+            timeout: Timeout for HTTP requests in seconds (default: 30.0)
         """
         self.base_url = base_url.rstrip("/")
         self.client = httpx.AsyncClient(
-            timeout=30.0, headers={"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
+            timeout=timeout, headers={"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
         )
         self._tools_cache = None
         self._session_id = None
@@ -120,22 +263,22 @@ class MCPClient:
         self.logger.debug(f"Parsing SSE response, length: {len(text)}")
 
         lines = text.strip().split("\n")
-        data_lines = []
+        parsed_data = []
 
         for line in lines:
             if line.startswith("data: "):
                 json_str = line[6:]
-                data_lines.append(json_str)
+                parsed = json.loads(json_str)
+                parsed_data.append(parsed)
 
-        if data_lines:
-            self.logger.debug(f"Found {len(data_lines)} data lines")
-            for idx, data_line in enumerate(data_lines):
-                parsed = json.loads(data_line)
+        if parsed_data:
+            self.logger.debug(f"Found {len(parsed_data)} data lines")
+            for idx, parsed in enumerate(parsed_data):
                 self.logger.debug(
                     f"Data line {idx}: method={parsed.get('method', 'N/A')}, has result={('result' in parsed)}"
                 )
 
-            return json.loads(data_lines[-1])
+            return parsed_data[-1]
 
         self.logger.debug("No data lines found, parsing entire response")
         return json.loads(text)
@@ -257,14 +400,15 @@ class MCPClient:
         await self.client.aclose()
 
 
-def load_agent_config(config_path: Path) -> configparser.ConfigParser:
-    """Load and validate agent configuration from INI file.
+def load_agent_config(config_path: Path, default_log_path: str = "logs/agents.log"):
+    """Load and validate agent configuration from INI file and setup logging.
 
     Args:
         config_path: Path to the configuration file
+        default_log_path: Default log file path if log_path not found in config
 
     Returns:
-        ConfigParser object with loaded configuration
+        Tuple of (config, llm, mcp_client)
 
     Raises:
         FileNotFoundError: If config file doesn't exist
@@ -293,7 +437,19 @@ def load_agent_config(config_path: Path) -> configparser.ConfigParser:
     if transport in ("sse", "http") and "url" not in config["mcp"]:
         raise ValueError(f"Missing 'url' in [mcp] section for {transport.upper()} transport")
 
-    return config
+    # Setup logging using shared log_path from config
+    setup_agent_logging(config, default_log_path)
+    
+    llm_config = config["llm"]
+    mcp_config = config["mcp"]
+    
+    model_name = llm_config["model_name"].replace("ollama_chat/", "")
+    llm_timeout = float(llm_config.get("timeout", "60.0"))
+    
+    llm = ChatOllama(model=model_name, temperature=0, verbose=True, timeout=llm_timeout)
+    mcp_client = create_mcp_client(mcp_config)
+    
+    return config, llm, mcp_client
 
 
 def create_mcp_client(mcp_config: configparser.SectionProxy) -> MCPClient:
@@ -313,122 +469,80 @@ def create_mcp_client(mcp_config: configparser.SectionProxy) -> MCPClient:
     if transport in ("sse", "http"):
         # HTTP/SSE transport
         mcp_url = mcp_config["url"].strip('"')  # Remove quotes if present
-        return MCPClient(base_url=mcp_url)
+        timeout = float(mcp_config.get("timeout", "30.0"))
+        return MCPClient(base_url=mcp_url, timeout=timeout)
     else:
         raise ValueError(
             f"Unsupported transport type: {transport}. Currently only 'http' and 'sse' are supported for LangChain integration."
         )
 
 
-def create_langchain_tool_with_confirmation_simple(tool_name: str, mcp_client: MCPClient):
-    """Create a LangChain tool wrapper with human confirmation requirement.
-
-    This tool will interrupt execution and wait for human approval before proceeding.
-
+async def _execute_tool_with_semaphore(
+    tool_name: str,
+    mcp_client: MCPClient,
+    filtered_kwargs: Dict[str, Any],
+    logger: logging.Logger,
+    require_confirmation: bool = True
+) -> str:
+    """Execute MCP tool with semaphore lock and optional confirmation.
+    
+    This helper function encapsulates the common execution logic for both
+    confirmation and no-confirmation tool variants.
+    
     Args:
-        tool_name: Name of the MCP tool
-        mcp_client: MCP client for execution
-
+        tool_name: Name of the MCP tool to execute
+        mcp_client: MCP client instance
+        filtered_kwargs: Filtered tool arguments
+        logger: Logger instance
+        require_confirmation: Whether to require human confirmation before execution
+        
     Returns:
-        LangChain StructuredTool instance with confirmation requirement
+        JSON string with tool execution result or error
     """
-    # Tool-specific descriptions and schemas
-    tool_configs = {
-        "create_independent_fileset": {
-            "description": "Create an INDEPENDENT fileset with its own inode space (can have snapshots)",
-            "args": {
-                "filesystem": {"type": str, "description": "The filesystem name (e.g., 'fs1')"},
-                "fileset_data": {
-                    "type": dict,
-                    "description": "Fileset configuration data including filesetName, path, etc.",
-                },
-                "domain": {"type": str, "description": "Domain for authorization", "optional": True},
-            },
-        },
-        "create_dependent_fileset": {
-            "description": "Create a DEPENDENT fileset that shares parent's inode space (more efficient, no independent snapshots)",
-            "args": {
-                "filesystem": {"type": str, "description": "The filesystem name (e.g., 'fs1')"},
-                "fileset_data": {
-                    "type": dict,
-                    "description": "Fileset configuration data including filesetName, path, etc.",
-                },
-                "domain": {"type": str, "description": "Domain for authorization", "optional": True},
-            },
-        },
-        "delete_fileset": {
-            "description": "Delete a fileset from a filesystem",
-            "args": {
-                "filesystem": {"type": str, "description": "The filesystem name"},
-                "fileset_name": {"type": str, "description": "The fileset name to delete"},
-            },
-        },
-        "create_fileset_snapshot": {
-            "description": "Create a snapshot for a fileset",
-            "args": {
-                "filesystem": {"type": str, "description": "The filesystem name"},
-                "fileset": {"type": str, "description": "The fileset name"},
-                "snapshot_data": {"type": dict, "description": "Snapshot configuration data including snapshotName"},
-                "domain": {"type": str, "description": "Domain for authorization", "optional": True},
-            },
-        },
-        "delete_fileset_snapshot": {
-            "description": "Delete a fileset snapshot",
-            "args": {
-                "filesystem": {"type": str, "description": "The filesystem name"},
-                "fileset": {"type": str, "description": "The fileset name"},
-                "snapshot_name": {"type": str, "description": "The snapshot name to delete"},
-                "domain": {"type": str, "description": "Domain for authorization", "optional": True},
-            },
-        },
-    }
-
-    config = tool_configs.get(tool_name, {})
-    tool_description = config.get("description", f"Execute {tool_name} operation (requires confirmation)")
-
-    # Dynamically create Pydantic model for the tool's input schema
-    fields = {}
-    annotations = {}
-    for arg_name, arg_config in config.get("args", {}).items():
-        arg_type = arg_config["type"]
-        arg_desc = arg_config["description"]
-        is_optional = arg_config.get("optional", False)
-
-        if is_optional:
-            annotations[arg_name] = Optional[arg_type]
-            fields[arg_name] = Field(default=None, description=arg_desc)
-        else:
-            annotations[arg_name] = arg_type
-            fields[arg_name] = Field(description=arg_desc)
-
-    # Create dynamic Pydantic model with proper annotations and defaults
-    InputModel = type(f"{tool_name}_input", (BaseModel,), {"__annotations__": annotations, **fields})
-
-    logger = logging.getLogger(__name__)
-
-    async def tool_func(**kwargs) -> str:
-        """Execute MCP tool with human confirmation requirement.
-
-        Uses a global semaphore to ensure sequential execution of all tools,
-        preventing concurrent tool calls that would cause SSE connection issues.
-        """
-        if mcp_client is None:
-            return f"Error: MCP client not initialized for tool {tool_name}"
-
-        filtered_kwargs = {k: v for k, v in kwargs.items() if v is not None}
-
-        # Acquire semaphore to ensure sequential execution
-        semaphore = get_tool_execution_semaphore()
-        async with semaphore:
-            logger.debug(f"[SEQUENTIAL] Acquired execution lock for {tool_name}")
-
-            print(f"\n{'=' * 70}")
+    if mcp_client is None:
+        return f"Error: MCP client not initialized for tool {tool_name}"
+    
+    # Acquire semaphore to ensure sequential execution
+    semaphore = get_tool_execution_semaphore()
+    async with semaphore:
+        logger.debug(f"[SEQUENTIAL] Acquired execution lock for {tool_name}")
+        
+        if require_confirmation:
+            print(f"\n{SEPARATOR_LINE}")
             print(f"CONFIRMATION REQUIRED: {tool_name}")
-            print(f"{'=' * 70}")
+            print(f"{SEPARATOR_LINE}")
             print("Arguments:")
             for key, value in filtered_kwargs.items():
-                print(f"  {key}: {value}")
-            print(f"{'=' * 70}")
+                # For policy_contents, decode and display the actual policy text
+                if key == "policy_contents" and isinstance(value, str):
+                    try:
+                        decoded_policy = decode_policy_contents(value)
+                        print(f"  {key}:")
+                        print("    --- Policy Content (decoded) ---")
+                        for line in decoded_policy.split('\n'):
+                            print(f"    {line}")
+                        print("    --- End Policy Content ---")
+                        
+                        # Generic duplicate detection: check for multiple rules
+                        import re
+                        rules = re.findall(r"RULE\s+'([^']+)'", decoded_policy, re.IGNORECASE)
+                        if len(rules) > 1:
+                            # Check for duplicate rule names
+                            unique_rules = set(rules)
+                            if len(rules) != len(unique_rules):
+                                print("\n    WARNING: Duplicate rule names detected")
+                                print("    TIP: If updating an existing rule, remove the old version")
+                            else:
+                                # Multiple rules with unique names - inform user
+                                print(f"\n    INFO: Policy contains {len(rules)} rules")
+                                print("    TIP: Review carefully if any rules have similar intent")
+                        
+                    except Exception:
+                        # If decoding fails, show the base64 string
+                        print(f"  {key}: {value}")
+                else:
+                    print(f"  {key}: {value}")
+            print(f"{SEPARATOR_LINE}")
 
             approval = interrupt(
                 {
@@ -441,28 +555,113 @@ def create_langchain_tool_with_confirmation_simple(tool_name: str, mcp_client: M
 
             if approval is None or not approval.get("approved", False):
                 logger.debug(f"[SEQUENTIAL] Released execution lock for {tool_name} (cancelled)")
-                return json.dumps({"status": "cancelled", "message": f"Operation {tool_name} cancelled by user"})
+                return json.dumps({
+                    "status": "error",
+                    "isError": True,
+                    "message": f"Operation {tool_name} cancelled by user",
+                    "cancelled": True
+                })
+        
+        logger.debug(f"{'Approved. ' if require_confirmation else ''}Calling {tool_name} with args: {filtered_kwargs}")
+        try:
+            result = await mcp_client.call_tool(tool_name, filtered_kwargs)
+            logger.debug(f"Result from {tool_name} (type: {type(result)})")
+            logger.debug(f"Full result: {json.dumps(result, indent=2)}")
+            logger.debug(f"[SEQUENTIAL] Released execution lock for {tool_name} (success)")
+            return json.dumps(result, indent=2)
+        except Exception as e:
+            error_msg = f"Error executing {tool_name}: {str(e)}"
+            logger.error(error_msg)
+            logger.debug(f"[SEQUENTIAL] Released execution lock for {tool_name} (error)")
+            return json.dumps({"status": "error", "message": error_msg})
 
-            logger.info(f"Approved. Calling {tool_name} with args: {filtered_kwargs}")
+
+def create_langchain_tool(tool_name: str, mcp_client: MCPClient, require_confirmation: bool = True):
+    """Create a LangChain tool wrapper with optional human confirmation.
+
+    This unified function replaces the separate confirmation and no-confirmation variants,
+    reducing code duplication while maintaining the same functionality.
+
+    Args:
+        tool_name: Name of the MCP tool
+        mcp_client: MCP client for execution
+        require_confirmation: Whether to require human approval before execution (default: True)
+
+    Returns:
+        LangChain StructuredTool instance
+        
+    Raises:
+        ValueError: If tool_name is not found in TOOL_CONFIGS
+    """
+    # Validate tool exists in configuration
+    if tool_name not in TOOL_CONFIGS:
+        raise ValueError(
+            f"Unknown tool '{tool_name}'. Available tools: {', '.join(TOOL_CONFIGS.keys())}"
+        )
+    
+    config = TOOL_CONFIGS[tool_name]
+    confirmation_suffix = " (requires confirmation)" if require_confirmation else ""
+    tool_description = config.get("description", f"Execute {tool_name} operation{confirmation_suffix}")
+
+    # Create Pydantic model using shared helper
+    InputModel = create_tool_input_model(tool_name, config.get("args", {}))
+
+    logger = logging.getLogger(__name__)
+
+    async def tool_func(**kwargs) -> str:
+        """Execute MCP tool with optional confirmation."""
+        # Filter kwargs using shared helper
+        filtered_kwargs = filter_tool_kwargs(kwargs)
+
+        # Process policy_contents for relevant tools
+        if tool_name in ("update_policy", "test_policy"):
+            process_policy_contents(tool_name, filtered_kwargs, logger)
+
+        result_str = await _execute_tool_with_semaphore(
+            tool_name, mcp_client, filtered_kwargs, logger, require_confirmation=require_confirmation
+        )
+        
+        # Auto-decode policy_contents for get_policy tool
+        if tool_name == "get_policy":
             try:
-                result = await mcp_client.call_tool(tool_name, filtered_kwargs)
-                logger.debug(f"Result from {tool_name} (type: {type(result)})")
-                logger.debug(f"Full result: {json.dumps(result, indent=2)}")
-                logger.debug(f"[SEQUENTIAL] Released execution lock for {tool_name} (success)")
-                return json.dumps(result, indent=2)
+                result = json.loads(result_str)
+                if isinstance(result, dict) and "policy_contents" in result and result["policy_contents"]:
+                    logger.debug("Decoding base64 policy_contents from get_policy response")
+                    result["policy_contents"] = decode_policy_contents(result["policy_contents"])
+                    result["decoded"] = True
+                    logger.debug(f"Decoded policy for {tool_name}:\n{result['policy_contents']}")
+                    return json.dumps(result, indent=2)
             except Exception as e:
-                error_msg = f"Error executing {tool_name}: {str(e)}"
-                logger.error(error_msg)
-                logger.debug(f"[SEQUENTIAL] Released execution lock for {tool_name} (error)")
-                return json.dumps({"status": "error", "message": error_msg})
+                logger.warning(f"Failed to decode policy_contents: {e}")
+        
+        return result_str
 
     tool = StructuredTool(name=tool_name, description=tool_description, args_schema=InputModel, coroutine=tool_func)
 
     return tool
 
 
+def create_langchain_tool_with_confirmation_simple(tool_name: str, mcp_client: MCPClient):
+    """Create a LangChain tool wrapper with human confirmation requirement.
+    
+    DEPRECATED: Use create_langchain_tool(tool_name, mcp_client, require_confirmation=True) instead.
+    This function is kept for backward compatibility.
+
+    Args:
+        tool_name: Name of the MCP tool
+        mcp_client: MCP client for execution
+
+    Returns:
+        LangChain StructuredTool instance with confirmation requirement
+    """
+    return create_langchain_tool(tool_name, mcp_client, require_confirmation=True)
+
+
 def create_langchain_tool_no_confirmation_simple(tool_name: str, mcp_client: MCPClient):
-    """Create a LangChain tool wrapper without fetching tool definition.
+    """Create a LangChain tool wrapper without confirmation requirement.
+    
+    DEPRECATED: Use create_langchain_tool(tool_name, mcp_client, require_confirmation=False) instead.
+    This function is kept for backward compatibility.
 
     Args:
         tool_name: Name of the MCP tool
@@ -471,96 +670,4 @@ def create_langchain_tool_no_confirmation_simple(tool_name: str, mcp_client: MCP
     Returns:
         LangChain StructuredTool instance
     """
-    # Tool-specific descriptions and schemas
-    tool_configs = {
-        "list_filesets": {
-            "description": "List all filesets in a filesystem",
-            "args": {
-                "filesystem": {"type": str, "description": "The filesystem name"},
-                "domain": {"type": str, "description": "Domain for authorization", "optional": True},
-            },
-        },
-        "link_fileset": {
-            "description": "Link a fileset to a junction path",
-            "args": {
-                "filesystem": {"type": str, "description": "The filesystem name"},
-                "fileset_name": {"type": str, "description": "The fileset name to link"},
-                "link_data": {"type": dict, "description": "Link configuration data including junction path"},
-                "domain": {"type": str, "description": "Domain for authorization", "optional": True},
-            },
-        },
-        "unlink_fileset": {
-            "description": "Unlink a fileset from its junction path",
-            "args": {
-                "filesystem": {"type": str, "description": "The filesystem name"},
-                "fileset_name": {"type": str, "description": "The fileset name to unlink"},
-                "unlink_data": {"type": dict, "description": "Unlink configuration data", "optional": True},
-                "domain": {"type": str, "description": "Domain for authorization", "optional": True},
-            },
-        },
-        "list_fileset_snapshots": {
-            "description": "List snapshots for a fileset",
-            "args": {
-                "filesystem": {"type": str, "description": "The filesystem name"},
-                "fileset": {"type": str, "description": "The fileset name"},
-                "domain": {"type": str, "description": "Domain for authorization", "optional": True},
-            },
-        },
-    }
-
-    config = tool_configs.get(tool_name, {})
-    tool_description = config.get("description", f"Execute {tool_name} operation")
-
-    # Dynamically create Pydantic model for the tool's input schema
-    fields = {}
-    annotations = {}
-    for arg_name, arg_config in config.get("args", {}).items():
-        arg_type = arg_config["type"]
-        arg_desc = arg_config["description"]
-        is_optional = arg_config.get("optional", False)
-
-        if is_optional:
-            annotations[arg_name] = Optional[arg_type]
-            fields[arg_name] = Field(default=None, description=arg_desc)
-        else:
-            annotations[arg_name] = arg_type
-            fields[arg_name] = Field(description=arg_desc)
-
-    # Create dynamic Pydantic model with proper annotations and defaults
-    InputModel = type(f"{tool_name}_input", (BaseModel,), {"__annotations__": annotations, **fields})
-
-    logger = logging.getLogger(__name__)
-
-    async def tool_func(**kwargs) -> str:
-        """Execute MCP tool without confirmation.
-
-        Uses a global semaphore to ensure sequential execution of all tools,
-        preventing concurrent tool calls that would cause SSE connection issues.
-        """
-        if mcp_client is None:
-            return f"Error: MCP client not initialized for tool {tool_name}"
-
-        filtered_kwargs = {k: v for k, v in kwargs.items() if v is not None}
-
-        # Acquire semaphore to ensure sequential execution
-        semaphore = get_tool_execution_semaphore()
-        async with semaphore:
-            logger.debug(f"[SEQUENTIAL] Acquired execution lock for {tool_name}")
-            logger.debug(f"Calling {tool_name} with args: {filtered_kwargs}")
-            try:
-                import json
-
-                result = await mcp_client.call_tool(tool_name, filtered_kwargs)
-                logger.debug(f"Result from {tool_name} (type: {type(result)})")
-                logger.debug(f"Full result: {json.dumps(result, indent=2)}")
-                logger.debug(f"[SEQUENTIAL] Released execution lock for {tool_name} (success)")
-                return json.dumps(result, indent=2)
-            except Exception as e:
-                error_msg = f"Error executing {tool_name}: {str(e)}"
-                logger.error(error_msg)
-                logger.debug(f"[SEQUENTIAL] Released execution lock for {tool_name} (error)")
-                return error_msg
-
-    tool = StructuredTool(name=tool_name, description=tool_description, args_schema=InputModel, coroutine=tool_func)
-
-    return tool
+    return create_langchain_tool(tool_name, mcp_client, require_confirmation=False)
