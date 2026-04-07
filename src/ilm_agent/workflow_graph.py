@@ -778,7 +778,7 @@ def _activate_workflow_for_rule_generation(
     
     # If rule keywords found and NOT calling get_policy, activate workflow and block
     if tool_name != "get_policy":
-        logger.debug(f"Rule generation intent detected - activating workflow, must start with get_policy")
+        logger.debug("Rule generation intent detected - activating workflow, must start with get_policy")
         updates["workflow_step"] = "get_policy"
         updates["workflow_active"] = True
         updates["user_request"] = user_request
@@ -787,7 +787,7 @@ def _activate_workflow_for_rule_generation(
         return _create_error_response(tool_call, tool_name, error, updates)
     
     # Activate workflow but allow get_policy to proceed
-    logger.debug(f"Rule generation intent detected - activating workflow")
+    logger.debug("Rule generation intent detected - activating workflow")
     updates["workflow_step"] = "get_policy"
     updates["workflow_active"] = True
     updates["user_request"] = user_request
@@ -831,7 +831,7 @@ def _validate_test_policy_from_initial(
     
     # If rule keywords found, ALWAYS activate workflow for proper rule generation
     if has_rule_keywords:
-        logger.debug(f"Rule generation intent detected - activating workflow to use LLM rule generator")
+        logger.debug("Rule generation intent detected - activating workflow to use LLM rule generator")
         updates["workflow_step"] = "get_policy"
         updates["workflow_active"] = True
         updates["user_request"] = user_request

@@ -518,10 +518,10 @@ async def _execute_tool_with_semaphore(
                     try:
                         decoded_policy = decode_policy_contents(value)
                         print(f"  {key}:")
-                        print(f"    --- Policy Content (decoded) ---")
+                        print("    --- Policy Content (decoded) ---")
                         for line in decoded_policy.split('\n'):
                             print(f"    {line}")
-                        print(f"    --- End Policy Content ---")
+                        print("    --- End Policy Content ---")
                         
                         # Generic duplicate detection: check for multiple rules
                         import re
@@ -530,12 +530,12 @@ async def _execute_tool_with_semaphore(
                             # Check for duplicate rule names
                             unique_rules = set(rules)
                             if len(rules) != len(unique_rules):
-                                print(f"\n    WARNING: Duplicate rule names detected")
-                                print(f"    TIP: If updating an existing rule, remove the old version")
+                                print("\n    WARNING: Duplicate rule names detected")
+                                print("    TIP: If updating an existing rule, remove the old version")
                             else:
                                 # Multiple rules with unique names - inform user
                                 print(f"\n    INFO: Policy contains {len(rules)} rules")
-                                print(f"    TIP: Review carefully if any rules have similar intent")
+                                print("    TIP: Review carefully if any rules have similar intent")
                         
                     except Exception:
                         # If decoding fails, show the base64 string
