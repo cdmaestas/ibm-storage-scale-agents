@@ -2,7 +2,6 @@
 
 This document describes the tools supported by the **Scale Provisioning Agent** and provides example prompts you can use in the interactive CLI.
 
----
 
 ## Supported Tools
 
@@ -31,7 +30,6 @@ These tools perform **read-only** or **non-destructive** operations and execute 
 | `unlink_fileset` | Unlink a fileset from its junction path |
 | `list_fileset_snapshots` | List all snapshots for a fileset |
 
----
 
 ## Tool Parameters
 
@@ -101,7 +99,6 @@ These tools perform **read-only** or **non-destructive** operations and execute 
 | `snapshot_name` | Yes | Name of the snapshot to delete |
 | `domain` | No | Domain for authorization |
 
----
 
 ## Example Prompts
 
@@ -166,7 +163,6 @@ Create a snapshot named snap1 for fileset myfset in fs1
 Delete snapshot snap1 from fileset myfset in filesystem fs1
 ```
 
----
 
 ## Agent Behavior Notes
 
