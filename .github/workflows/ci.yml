@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Ruff lint
+        run: uvx ruff@0.16.0 check .
+
+      - name: Ruff format check
+        run: uvx ruff@0.16.0 format --check .
+
+      - name: Import smoke test
+        run: |
+          uv run python -c "import main, src.utils.common, src.ilm_agent.workflow_graph, src.ilm_agent.rule_generator, src.orchestrator_agent.agent, src.provisioning_agent.agent; print('imports OK')"
+
+      - name: Dependency vulnerability audit
+        run: uv run --with pip-audit pip-audit --skip-editable

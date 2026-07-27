@@ -1,0 +1,35 @@
+# Pre-commit hooks for scale-agents.
+# Install once with:  uvx pre-commit install --install-hooks -t pre-commit -t pre-push
+# Run against all files: uvx pre-commit run --all-files
+default_install_hook_types: [pre-commit, pre-push]
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.0
+    hooks:
+      # Lint (with autofix) — must match the [tool.ruff] config in pyproject.toml
+      - id: ruff
+        args: [--fix]
+      # Format check
+      - id: ruff-format
+
+  # Local checks that need the project environment.
+  - repo: local
+    hooks:
+      # Runs before push only (the repo has no unit-test suite yet, so the
+      # import smoke test is the fullest correctness gate available).
+      - id: import-smoke-test
+        name: import smoke test
+        entry: uv run python -c "import main, src.utils.common, src.ilm_agent.workflow_graph, src.ilm_agent.rule_generator, src.orchestrator_agent.agent, src.provisioning_agent.agent"
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
