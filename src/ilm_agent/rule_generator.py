@@ -18,11 +18,22 @@ def _load_syntax_documentation() -> str:
     global _SYNTAX_DOCS_CONTENT
     if _SYNTAX_DOCS_CONTENT is None:
         try:
-            _SYNTAX_DOCS_CONTENT = _SYNTAX_DOCS_PATH.read_text(encoding='utf-8')
+            _SYNTAX_DOCS_CONTENT = _SYNTAX_DOCS_PATH.read_text(encoding="utf-8")
             logger.debug(f"Loaded policy syntax documentation from {_SYNTAX_DOCS_PATH}")
-        except Exception as e:
+        except OSError as e:
+            # This markdown file is a required, shipped resource. Without it the
+            # LLM has no syntax context and would silently emit invalid IBM
+            # Storage Scale policy rules. Fail loudly instead of degrading.
             logger.error(f"Failed to load syntax documentation: {e}")
-            _SYNTAX_DOCS_CONTENT = ""
+            raise RuntimeError(
+                f"Required policy syntax documentation is missing or unreadable at "
+                f"{_SYNTAX_DOCS_PATH}: {e}"
+            ) from e
+        if not _SYNTAX_DOCS_CONTENT.strip():
+            raise RuntimeError(
+                f"Policy syntax documentation at {_SYNTAX_DOCS_PATH} is empty; "
+                "cannot generate valid policy rules without it."
+            )
     return _SYNTAX_DOCS_CONTENT
 
 

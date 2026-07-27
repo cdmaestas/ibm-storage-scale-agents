@@ -5,6 +5,7 @@ import base64
 import configparser
 import json
 import logging
+import re
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -84,8 +85,9 @@ def process_policy_contents(tool_name: str, filtered_kwargs: dict, logger: loggi
     try:
         decoded_bytes = base64.b64decode(raw, validate=True)
         raw = decoded_bytes.decode("utf-8")
-    except Exception:
-        # Input is not base64-encoded, treating as plain text
+    except ValueError:
+        # Not valid base64 (binascii.Error) or not UTF-8 (UnicodeDecodeError),
+        # both ValueError subclasses: input is plain text, use it as-is.
         logger.debug(f"Input for {tool_name} is not base64-encoded, treating as plain text")
     
     # Log the decoded policy content before encoding
@@ -258,8 +260,6 @@ class MCPClient:
         Returns:
             Parsed JSON data from the SSE message
         """
-        import json
-
         self.logger.debug(f"Parsing SSE response, length: {len(text)}")
 
         lines = text.strip().split("\n")
@@ -373,8 +373,6 @@ class MCPClient:
                 for idx, content_item in enumerate(mcp_result["content"]):
                     self.logger.debug(f"Content item {idx}: type={content_item.get('type')}")
                     if content_item.get("type") == "text" and "text" in content_item:
-                        import json
-
                         text_content = content_item["text"]
                         self.logger.debug(f"Text content (first 200 chars): {text_content[:200]}")
 
@@ -524,7 +522,6 @@ async def _execute_tool_with_semaphore(
                         print("    --- End Policy Content ---")
                         
                         # Generic duplicate detection: check for multiple rules
-                        import re
                         rules = re.findall(r"RULE\s+'([^']+)'", decoded_policy, re.IGNORECASE)
                         if len(rules) > 1:
                             # Check for duplicate rule names
@@ -631,7 +628,10 @@ def create_langchain_tool(tool_name: str, mcp_client: MCPClient, require_confirm
                     result["decoded"] = True
                     logger.debug(f"Decoded policy for {tool_name}:\n{result['policy_contents']}")
                     return json.dumps(result, indent=2)
-            except Exception as e:
+            except (json.JSONDecodeError, ValueError) as e:
+                # Response not JSON, or policy_contents not valid base64/UTF-8:
+                # fall back to the raw result rather than failing get_policy.
+                # Narrowed so unexpected errors surface instead of being hidden.
                 logger.warning(f"Failed to decode policy_contents: {e}")
         
         return result_str

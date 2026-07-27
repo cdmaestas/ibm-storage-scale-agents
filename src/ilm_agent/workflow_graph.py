@@ -1106,10 +1106,8 @@ Respond in JSON format:
         try:
             response = await llm.ainvoke([HumanMessage(content=validation_prompt)])
             validation_text = response.content.strip()
-            
-            # Parse JSON response
-            import json
-            # Extract JSON from response (handle markdown code blocks)
+
+            # Parse JSON response (handle markdown code blocks)
             if "```json" in validation_text:
                 validation_text = validation_text.split("```json")[1].split("```")[0].strip()
             elif "```" in validation_text:
@@ -1148,10 +1146,25 @@ Respond in JSON format:
             }
             
         except Exception as e:
+            # The duplicate/conflict check is advisory; the real gates are
+            # test_policy and user confirmation, so a failure here does not
+            # block the workflow. But we must NOT record the failure as a clean
+            # "no duplicates" result - that would silently hide a real overlap.
+            # Surface it explicitly so the agent and user know the check was
+            # skipped and must review the combined policy themselves.
             logger.error(f"Rule validation failed: {str(e)}")
-            # On validation error, proceed anyway but log the issue
+            skipped_msg = HumanMessage(
+                content=(
+                    "[Rule Validation Skipped]\n"
+                    f"WARNING: Automated duplicate/conflict detection could not run ({e}).\n"
+                    "The rule was NOT checked against existing rules. Review the "
+                    "combined policy carefully during confirmation before applying."
+                )
+            )
             return {
+                "messages": [skipped_msg],
                 "rule_validated": True,
+                "rule_validation_result": {"error": str(e), "validated": False},
                 "has_duplicate_intent": False,
                 "has_conflicting_intent": False,
                 "error_message": f"Rule validation failed: {str(e)}",
@@ -1176,9 +1189,11 @@ Respond in JSON format:
                 if isinstance(content, dict) and content.get("status") == "error":
                     logger.debug("Validation returned error - returning to agent")
                     return "agent"
-            except Exception:
-                pass
-        
+            except json.JSONDecodeError:
+                # Non-JSON tool content carries no error status field; treat it
+                # as a normal (non-error) result and proceed to tools.
+                logger.debug("ToolMessage content is not JSON - treating as non-error")
+
         return "tools"
     
     def should_generate_or_validate_rule(state: ILMWorkflowState) -> Literal["generate_rule", "validate_rule", "agent"]:
