@@ -14,3 +14,6 @@ logs/
 
 # Linter cache
 .ruff_cache
+
+# Tooling venv (hardening pass)
+.venv-tools/
