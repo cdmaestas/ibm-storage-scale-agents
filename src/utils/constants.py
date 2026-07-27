@@ -1,4 +1,4 @@
-SEPARATOR_LINE = '=' * 70
+SEPARATOR_LINE = "=" * 70
 
 PROVISIONING_AGENT_SYSTEM_PROMPT = """You are an IBM Storage Scale agent. Use the available tools to complete user requests.
 
@@ -153,9 +153,20 @@ AGENT_METADATA = {
 # Agent Routing Keywords
 # Keywords used to route user requests to the appropriate agent
 ILM_ROUTING_KEYWORDS = [
-    'policy', 'policies', 'migrate', 'migration', 'delete files',
-    'old files', 'archive', 'lifecycle', 'ilm', 'pool',
-    'days old', 'older than', 'not accessed', 'age-based'
+    "policy",
+    "policies",
+    "migrate",
+    "migration",
+    "delete files",
+    "old files",
+    "archive",
+    "lifecycle",
+    "ilm",
+    "pool",
+    "days old",
+    "older than",
+    "not accessed",
+    "age-based",
 ]
 
 # Tool configuration dictionary - shared between confirmation and no-confirmation tools
@@ -311,13 +322,29 @@ TOOL_CONFIGS = {
 }
 
 PROVISIONING_ROUTING_KEYWORDS = [
-    'fileset', 'filesets', 'snapshot', 'snapshots',
-    'link', 'unlink', 'junction', 'independent', 'dependent'
+    "fileset",
+    "filesets",
+    "snapshot",
+    "snapshots",
+    "link",
+    "unlink",
+    "junction",
+    "independent",
+    "dependent",
 ]
 
 # Orchestrator routing keywords - meta-queries and multi-agent tasks
 ORCHESTRATOR_ROUTING_KEYWORDS = [
-    'list tools', 'show tools', 'what tools', 'available tools',
-    'tools you have', 'what can you do', 'capabilities', 'list all tools',
-    'help', 'agents', 'what agents', 'available agents'
+    "list tools",
+    "show tools",
+    "what tools",
+    "available tools",
+    "tools you have",
+    "what can you do",
+    "capabilities",
+    "list all tools",
+    "help",
+    "agents",
+    "what agents",
+    "available agents",
 ]

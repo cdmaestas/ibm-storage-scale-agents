@@ -11,7 +11,7 @@ RULE ['RuleName'] [WHEN TimeBooleanExpression]
     [FROM POOL 'FromPoolName']
     [THRESHOLD (HighPercentage[,LowPercentage[,PremigratePercentage]])]
     [WEIGHT (WeightExpression)]
-  TO POOL 'ToPoolName'    
+  TO POOL 'ToPoolName'
     [LIMIT (OccupancyPercentage)]
     [REPLICATE (DataReplication)]
     [FOR FILESET ('FilesetName'[,'FilesetName']...)]

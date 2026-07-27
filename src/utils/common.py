@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 from src.utils.constants import SEPARATOR_LINE, TOOL_CONFIGS
 
 # Null placeholder strings that LLMs may generate for optional parameters
-NULL_PLACEHOLDERS = ('<nil>', 'null', 'NULL', '<null>', 'nil', '')
+NULL_PLACEHOLDERS = ("<nil>", "null", "NULL", "<null>", "nil", "")
 
 # Global semaphore to enforce sequential tool execution
 # This ensures only one tool executes at a time across all tool instances
@@ -47,7 +47,7 @@ def decode_policy_contents(base64_content: str) -> str:
 
     Returns:
         Decoded plain text policy content
- 
+
     Raises:
         ValueError: If content is not valid base64 or UTF-8
     """
@@ -60,14 +60,14 @@ def decode_policy_contents(base64_content: str) -> str:
 
 def process_policy_contents(tool_name: str, filtered_kwargs: dict, logger: logging.Logger) -> None:
     """Process policy_contents parameter: normalize to base64 encoding for MCP transmission.
-    
+
     This is a shared helper for both test_policy and update_policy tools.
     Modifies filtered_kwargs in place.
-    
+
     The decode/encode cycle serves two purposes:
     1. Normalizes input - accepts both plain text and base64-encoded content
     2. Ensures consistent base64 encoding for MCP server transmission
-    
+
     Args:
         tool_name: Name of the tool being called
         filtered_kwargs: Dictionary of tool arguments (modified in place)
@@ -75,11 +75,11 @@ def process_policy_contents(tool_name: str, filtered_kwargs: dict, logger: loggi
     """
     if "policy_contents" not in filtered_kwargs:
         return
-        
+
     raw = filtered_kwargs["policy_contents"]
     if not isinstance(raw, str):
         return
-    
+
     # Normalize input: if already base64, decode to plain text first
     # This allows the function to accept both plain text and base64-encoded input
     try:
@@ -89,11 +89,11 @@ def process_policy_contents(tool_name: str, filtered_kwargs: dict, logger: loggi
         # Not valid base64 (binascii.Error) or not UTF-8 (UnicodeDecodeError),
         # both ValueError subclasses: input is plain text, use it as-is.
         logger.debug(f"Input for {tool_name} is not base64-encoded, treating as plain text")
-    
+
     # Log the decoded policy content before encoding
     logger.debug(f"Raw policy content for {tool_name} (decoded):")
     logger.debug(raw)
-    
+
     # Always encode to base64 for consistent MCP transmission
     encoded = base64.b64encode(raw.encode("utf-8")).decode("utf-8")
     filtered_kwargs["policy_contents"] = encoded
@@ -101,12 +101,12 @@ def process_policy_contents(tool_name: str, filtered_kwargs: dict, logger: loggi
 
 def filter_tool_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
     """Filter out None and LLM-generated placeholder strings for optional parameters.
-    
+
     Some LLMs may generate '<nil>', 'null', etc. instead of omitting optional params.
-    
+
     Args:
         kwargs: Dictionary of tool arguments
-        
+
     Returns:
         Filtered dictionary with None and placeholder values removed
     """
@@ -123,17 +123,17 @@ def filter_tool_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
 
 def create_tool_input_model(tool_name: str, args_config: dict[str, Any]) -> type[BaseModel]:
     """Dynamically create a Pydantic model for a tool's input schema.
-    
+
     Args:
         tool_name: Name of the tool
         args_config: Dictionary of argument configurations
-        
+
     Returns:
         Dynamically created Pydantic BaseModel class
     """
     fields = {}
     annotations = {}
-    
+
     for arg_name, arg_config in args_config.items():
         arg_type = arg_config["type"]
         arg_desc = arg_config["description"]
@@ -145,7 +145,7 @@ def create_tool_input_model(tool_name: str, args_config: dict[str, Any]) -> type
         else:
             annotations[arg_name] = arg_type
             fields[arg_name] = Field(description=arg_desc)
-    
+
     # Create dynamic Pydantic model with proper annotations and defaults
     return type(f"{tool_name}_input", (BaseModel,), {"__annotations__": annotations, **fields})
 
@@ -158,7 +158,7 @@ def setup_logging(
     backup_count: int = 5,
 ) -> logging.Logger:
     """Setup logging based on configuration.
-    
+
     This function is idempotent - calling it multiple times with the same log_file
     will not create duplicate handlers.
 
@@ -183,7 +183,7 @@ def setup_logging(
 
     root_logger = logging.getLogger()
     root_logger.setLevel(log_level_value)
-    
+
     # Only setup handlers once (on first call)
     if not root_logger.handlers:
         # Suppress noisy third-party loggers: use the configured level but no lower than WARNING
@@ -214,7 +214,7 @@ def setup_logging(
 
 def setup_agent_logging(config: configparser.ConfigParser, default_log_path: str) -> None:
     """Setup logging for an agent from configuration.
-    
+
     Uses a shared log file (log_path) for all agents.
 
     Args:
@@ -245,7 +245,8 @@ class MCPClient:
         """
         self.base_url = base_url.rstrip("/")
         self.client = httpx.AsyncClient(
-            timeout=timeout, headers={"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
+            timeout=timeout,
+            headers={"Content-Type": "application/json", "Accept": "application/json, text/event-stream"},
         )
         self._tools_cache = None
         self._session_id = None
@@ -437,16 +438,16 @@ def load_agent_config(config_path: Path, default_log_path: str = "logs/agents.lo
 
     # Setup logging using shared log_path from config
     setup_agent_logging(config, default_log_path)
-    
+
     llm_config = config["llm"]
     mcp_config = config["mcp"]
-    
+
     model_name = llm_config["model_name"].replace("ollama_chat/", "")
     llm_timeout = float(llm_config.get("timeout", "60.0"))
-    
+
     llm = ChatOllama(model=model_name, temperature=0, verbose=True, timeout=llm_timeout)
     mcp_client = create_mcp_client(mcp_config)
-    
+
     return config, llm, mcp_client
 
 
@@ -480,31 +481,31 @@ async def _execute_tool_with_semaphore(
     mcp_client: MCPClient,
     filtered_kwargs: dict[str, Any],
     logger: logging.Logger,
-    require_confirmation: bool = True
+    require_confirmation: bool = True,
 ) -> str:
     """Execute MCP tool with semaphore lock and optional confirmation.
-    
+
     This helper function encapsulates the common execution logic for both
     confirmation and no-confirmation tool variants.
-    
+
     Args:
         tool_name: Name of the MCP tool to execute
         mcp_client: MCP client instance
         filtered_kwargs: Filtered tool arguments
         logger: Logger instance
         require_confirmation: Whether to require human confirmation before execution
-        
+
     Returns:
         JSON string with tool execution result or error
     """
     if mcp_client is None:
         return f"Error: MCP client not initialized for tool {tool_name}"
-    
+
     # Acquire semaphore to ensure sequential execution
     semaphore = get_tool_execution_semaphore()
     async with semaphore:
         logger.debug(f"[SEQUENTIAL] Acquired execution lock for {tool_name}")
-        
+
         if require_confirmation:
             print(f"\n{SEPARATOR_LINE}")
             print(f"CONFIRMATION REQUIRED: {tool_name}")
@@ -517,10 +518,10 @@ async def _execute_tool_with_semaphore(
                         decoded_policy = decode_policy_contents(value)
                         print(f"  {key}:")
                         print("    --- Policy Content (decoded) ---")
-                        for line in decoded_policy.split('\n'):
+                        for line in decoded_policy.split("\n"):
                             print(f"    {line}")
                         print("    --- End Policy Content ---")
-                        
+
                         # Generic duplicate detection: check for multiple rules
                         rules = re.findall(r"RULE\s+'([^']+)'", decoded_policy, re.IGNORECASE)
                         if len(rules) > 1:
@@ -533,7 +534,7 @@ async def _execute_tool_with_semaphore(
                                 # Multiple rules with unique names - inform user
                                 print(f"\n    INFO: Policy contains {len(rules)} rules")
                                 print("    TIP: Review carefully if any rules have similar intent")
-                        
+
                     except Exception:
                         # If decoding fails, show the base64 string
                         print(f"  {key}: {value}")
@@ -552,13 +553,15 @@ async def _execute_tool_with_semaphore(
 
             if approval is None or not approval.get("approved", False):
                 logger.debug(f"[SEQUENTIAL] Released execution lock for {tool_name} (cancelled)")
-                return json.dumps({
-                    "status": "error",
-                    "isError": True,
-                    "message": f"Operation {tool_name} cancelled by user",
-                    "cancelled": True
-                })
-        
+                return json.dumps(
+                    {
+                        "status": "error",
+                        "isError": True,
+                        "message": f"Operation {tool_name} cancelled by user",
+                        "cancelled": True,
+                    }
+                )
+
         logger.debug(f"{'Approved. ' if require_confirmation else ''}Calling {tool_name} with args: {filtered_kwargs}")
         try:
             result = await mcp_client.call_tool(tool_name, filtered_kwargs)
@@ -586,16 +589,14 @@ def create_langchain_tool(tool_name: str, mcp_client: MCPClient, require_confirm
 
     Returns:
         LangChain StructuredTool instance
-        
+
     Raises:
         ValueError: If tool_name is not found in TOOL_CONFIGS
     """
     # Validate tool exists in configuration
     if tool_name not in TOOL_CONFIGS:
-        raise ValueError(
-            f"Unknown tool '{tool_name}'. Available tools: {', '.join(TOOL_CONFIGS.keys())}"
-        )
-    
+        raise ValueError(f"Unknown tool '{tool_name}'. Available tools: {', '.join(TOOL_CONFIGS.keys())}")
+
     config = TOOL_CONFIGS[tool_name]
     confirmation_suffix = " (requires confirmation)" if require_confirmation else ""
     tool_description = config.get("description", f"Execute {tool_name} operation{confirmation_suffix}")
@@ -617,7 +618,7 @@ def create_langchain_tool(tool_name: str, mcp_client: MCPClient, require_confirm
         result_str = await _execute_tool_with_semaphore(
             tool_name, mcp_client, filtered_kwargs, logger, require_confirmation=require_confirmation
         )
-        
+
         # Auto-decode policy_contents for get_policy tool
         if tool_name == "get_policy":
             try:
@@ -633,7 +634,7 @@ def create_langchain_tool(tool_name: str, mcp_client: MCPClient, require_confirm
                 # fall back to the raw result rather than failing get_policy.
                 # Narrowed so unexpected errors surface instead of being hidden.
                 logger.warning(f"Failed to decode policy_contents: {e}")
-        
+
         return result_str
 
     tool = StructuredTool(name=tool_name, description=tool_description, args_schema=InputModel, coroutine=tool_func)
@@ -643,7 +644,7 @@ def create_langchain_tool(tool_name: str, mcp_client: MCPClient, require_confirm
 
 def create_langchain_tool_with_confirmation_simple(tool_name: str, mcp_client: MCPClient):
     """Create a LangChain tool wrapper with human confirmation requirement.
-    
+
     DEPRECATED: Use create_langchain_tool(tool_name, mcp_client, require_confirmation=True) instead.
     This function is kept for backward compatibility.
 
@@ -659,7 +660,7 @@ def create_langchain_tool_with_confirmation_simple(tool_name: str, mcp_client: M
 
 def create_langchain_tool_no_confirmation_simple(tool_name: str, mcp_client: MCPClient):
     """Create a LangChain tool wrapper without confirmation requirement.
-    
+
     DEPRECATED: Use create_langchain_tool(tool_name, mcp_client, require_confirmation=False) instead.
     This function is kept for backward compatibility.
 

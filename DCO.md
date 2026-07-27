@@ -25,7 +25,7 @@ By making a contribution to this project, I certify that:
     maintained indefinitely and may be redistributed consistent with
     this project or the open source license(s) involved.
 
-		   
+
 ***
 And please confirm your certification to the above by adding the following
 line to your patch:

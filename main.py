@@ -22,9 +22,11 @@ from src.utils.constants import (
 )
 
 logger = logging.getLogger(__name__)
+
+
 async def route_to_agent(user_input: str) -> str:
     """Use keyword-based routing to determine which agent should handle the request.
-    
+
     Returns:
         Agent type constant (AGENT_TYPE_ORCHESTRATOR, AGENT_TYPE_ILM, or AGENT_TYPE_PROVISIONING)
     """
@@ -126,7 +128,7 @@ async def run_agent(agent, user_input: str, config: dict, first_turn: bool = Fal
             if messages_in_event:
                 last_msg = messages_in_event[-1]
                 msg_type = type(last_msg).__name__
-                
+
                 if msg_type == "AIMessage" and hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
                     for tool_call in last_msg.tool_calls:
                         logger.debug(f"Agent calling tool: {tool_call.get('name', 'unknown')}")
@@ -184,7 +186,6 @@ async def main():
                     continue
 
                 route = await route_to_agent(user_input)
-                
 
                 if route == AGENT_TYPE_ORCHESTRATOR:
                     selected_agent = orchestrator_agent
@@ -198,7 +199,7 @@ async def main():
                     selected_agent = provisioning_agent
                     selected_config = provisioning_config
                     selected_label = f"{AGENT_TYPE_PROVISIONING.capitalize()} Agent"
-                
+
                 if current_agent != selected_agent:
                     if current_agent is not None:
                         print(f"\n[Switching to {selected_label}]\n")

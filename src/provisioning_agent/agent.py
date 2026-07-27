@@ -24,12 +24,7 @@ class ProvisioningAgent:
     """Agent for managing IBM Storage Scale filesets and snapshots."""
 
     def __init__(self, config_path: str = "config/agents_settings.ini"):
-        self.config, self.llm, self.mcp_client = load_agent_config(
-            Path(config_path),
-            "logs/agents.log"
-        )
-
-
+        self.config, self.llm, self.mcp_client = load_agent_config(Path(config_path), "logs/agents.log")
 
         self.agent_executor = None
         self.tools: list = []

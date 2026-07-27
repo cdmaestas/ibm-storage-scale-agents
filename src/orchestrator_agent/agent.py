@@ -33,21 +33,19 @@ class OrchestratorAgent:
         agent_registry: dict[str, Any] | None = None,
     ):
         """Initialize orchestrator agent.
-        
+
         Args:
             config_path: Path to configuration file
             agent_registry: Dictionary mapping agent types to agent instances
         """
-        self.config, self.llm, self.mcp_client = load_agent_config(
-            Path(config_path), "logs/agents.log"
-        )
+        self.config, self.llm, self.mcp_client = load_agent_config(Path(config_path), "logs/agents.log")
         self.agent_executor = None
         self.tools: list = []
         self.agent_registry = agent_registry or {}
 
     def set_agent_registry(self, agent_registry: dict[str, Any]):
         """Set the agent registry after initialization.
-        
+
         Args:
             agent_registry: Dictionary mapping agent types to agent instances
         """
@@ -82,6 +80,7 @@ class OrchestratorAgent:
 
         class ListAllToolsInput(BaseModel):
             """Input for list_all_tools - no parameters needed."""
+
             pass
 
         async def list_all_tools() -> str:
@@ -111,9 +110,7 @@ class OrchestratorAgent:
         """Create tool for getting information about a specific agent."""
 
         class GetAgentInfoInput(BaseModel):
-            agent_type: str = Field(
-                description=f"Agent type: '{AGENT_TYPE_PROVISIONING}' or '{AGENT_TYPE_ILM}'"
-            )
+            agent_type: str = Field(description=f"Agent type: '{AGENT_TYPE_PROVISIONING}' or '{AGENT_TYPE_ILM}'")
 
         async def get_agent_info(agent_type: str) -> str:
             """Get detailed information about a specific agent's capabilities."""
@@ -145,7 +142,7 @@ class OrchestratorAgent:
 
         async def delegate_to_agent(agent_type: str, task: str) -> str:
             """Delegate a task to a specialized agent and return the result.
-            
+
             This enables agent-to-agent communication by allowing the orchestrator
             to invoke other agents and get their responses.
             """
@@ -171,6 +168,7 @@ class OrchestratorAgent:
                 if agent_type == "ilm":
                     # ILM agent requires full workflow state
                     from src.ilm_agent.workflow_graph import create_initial_state
+
                     initial_state = create_initial_state()
                     initial_state["messages"] = messages
                 else:
@@ -200,9 +198,7 @@ class OrchestratorAgent:
                                 }
                             )
 
-                return json.dumps(
-                    {"agent": agent_type, "status": "error", "message": "No response from agent"}
-                )
+                return json.dumps({"agent": agent_type, "status": "error", "message": "No response from agent"})
 
             except Exception as e:
                 error_msg = f"Error delegating to {agent_type}: {str(e)}"

@@ -69,20 +69,20 @@ MAX_USER_INPUT_LENGTH = 10000
 
 class ILMWorkflowState(TypedDict):
     """State for ILM workflow with enforced sequencing."""
-    
+
     # Standard message history
     messages: Annotated[list[BaseMessage], add_messages]
-    
+
     # Workflow tracking
     workflow_step: str  # current step: "initial", "get_policy", "generate_rule", "verify_pools", "validate_rule", "test_policy", "update_policy", "apply_policy", "completed", "cancelled"
     workflow_active: bool  # True when workflow is actively managing a modification sequence
     filesystem: str | None
-    
+
     # Data collected during workflow
     existing_policy: dict[str, Any] | None
     existing_policy_text: str | None
     storage_pools: list[str] | None
-    
+
     # Rule generation data
     user_request: str | None  # Original user request for rule generation
     target_pool: str | None  # Target pool for migration
@@ -103,10 +103,10 @@ class ILMWorkflowState(TypedDict):
     policy_tested: bool
     test_passed: bool
     policy_updated: bool
-    
+
     # Error tracking
     error_message: str | None
-    
+
     # Performance cache - last user message to avoid repeated traversal
     last_user_message: str | None
 
@@ -143,59 +143,59 @@ def create_initial_state() -> ILMWorkflowState:
 
 def _combine_policies(existing_policy_text: str, new_rule_content: str) -> str:
     """Combine existing policy with new rule.
-    
+
     Args:
         existing_policy_text: Existing policy content (decoded)
         new_rule_content: New rule to add
-        
+
     Returns:
         Combined policy with all rules
     """
     if not existing_policy_text:
         return new_rule_content
-    
+
     if not new_rule_content:
         return existing_policy_text
-    
+
     # Ensure both parts end with newline for clean combination
-    existing = existing_policy_text.rstrip('\n')
-    new_rule = new_rule_content.rstrip('\n')
-    
+    existing = existing_policy_text.rstrip("\n")
+    new_rule = new_rule_content.rstrip("\n")
+
     return f"{existing}\n{new_rule}"
 
 
 def _sanitize_user_input(text: str) -> str:
     """Sanitize user input for safe inclusion in messages.
-    
+
     Args:
         text: User input text to sanitize
-        
+
     Returns:
         Sanitized text with length limits and escaped special characters
     """
     if not text:
         return ""
-    
+
     # Truncate to maximum length
     if len(text) > MAX_USER_INPUT_LENGTH:
         text = text[:MAX_USER_INPUT_LENGTH] + "... [truncated]"
-    
+
     # Escape control characters and excessive whitespace
-    text = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', text)
-    text = re.sub(r'\s+', ' ', text)
-    
+    text = re.sub(r"[\x00-\x1f\x7f-\x9f]", "", text)
+    text = re.sub(r"\s+", " ", text)
+
     return text.strip()
 
 
 def _find_user_request(messages: list[BaseMessage]) -> str | None:
     """Extract the most recent user request from messages.
-    
+
     This is the canonical implementation used throughout the workflow.
     Filters out system-generated messages (those starting with '[').
-    
+
     Args:
         messages: List of conversation messages
-        
+
     Returns:
         Most recent user message content, or None if not found
     """
@@ -207,55 +207,55 @@ def _find_user_request(messages: list[BaseMessage]) -> str | None:
 
 def _is_question_not_action(user_request: str) -> bool:
     """Determine if user request is an informational question vs action request.
-    
+
     Args:
         user_request: User's message text
-        
+
     Returns:
         True if this appears to be a question, False if it's an action request
     """
     request_lower = user_request.lower().strip()
-    
+
     # Check for question keywords at start
     if any(request_lower.startswith(kw) for kw in QUESTION_KEYWORDS):
         return True
-    
+
     # Check for explicit action phrases (override question detection)
     if any(phrase in request_lower for phrase in ACTION_PHRASES):
         return False
-    
+
     # Check if it ends with question mark
     if request_lower.endswith("?"):
         return True
-    
+
     return False
 
 
 def _has_intent_keywords(text: str, keywords: list[str]) -> bool:
     """Check if text contains any of the intent keywords using word boundary matching.
-    
+
     Uses regex word boundaries to avoid false positives from substrings.
-    
+
     Args:
         text: Text to search
         keywords: List of keywords to search for
-        
+
     Returns:
         True if any keyword found with word boundaries
     """
     if not text:
         return False
-    
+
     text_lower = text.lower()
-    return any(re.search(rf'\b{re.escape(kw)}\b', text_lower) for kw in keywords)
+    return any(re.search(rf"\b{re.escape(kw)}\b", text_lower) for kw in keywords)
 
 
 def _get_workflow_guidance(state: ILMWorkflowState) -> str:
     """Generate workflow guidance for the LLM agent based on current state.
-    
+
     This guidance is sent to the LLM agent to instruct it on what
     actions to take next and what to communicate to the user.
-    
+
     Note: Workflow reset is handled in validate_tool_call, not here.
     If workflow is in completed/cancelled state, we return empty guidance
     to allow the reset to happen naturally when tool calls are made.
@@ -268,9 +268,11 @@ def _get_workflow_guidance(state: ILMWorkflowState) -> str:
             last_msg = messages[-1]
             # If last message is from user (not system-generated), it's a new request
             if isinstance(last_msg, HumanMessage) and not last_msg.content.startswith("["):
-                logger.debug(f"Workflow in {state['workflow_step']} state with new user message - returning empty guidance")
+                logger.debug(
+                    f"Workflow in {state['workflow_step']} state with new user message - returning empty guidance"
+                )
                 return ""
-        
+
         # If we're still in cancelled state and it's not a new request, show cancellation message
         if state["workflow_step"] == "cancelled":
             return (
@@ -279,7 +281,7 @@ def _get_workflow_guidance(state: ILMWorkflowState) -> str:
                 "Inform the user that the operation was cancelled and the policy remains unchanged.\n"
                 "Do NOT retry test_policy or update_policy unless the user explicitly requests it."
             )
-        
+
         # Completed state with no new request - show completion message
         return (
             "AGENT INSTRUCTION: Workflow completed successfully. "
@@ -288,7 +290,7 @@ def _get_workflow_guidance(state: ILMWorkflowState) -> str:
         )
 
     error = state.get("error_message")
-    
+
     # If there's an error, provide context about it
     if error:
         # Check if it's a cancellation error
@@ -306,7 +308,7 @@ def _get_workflow_guidance(state: ILMWorkflowState) -> str:
             "2. Try a different approach\n"
             "3. Ask the user for clarification"
         )
-    
+
     # Workflow step guidance mapping
     step = state["workflow_step"]
 
@@ -351,7 +353,7 @@ def _get_workflow_guidance(state: ILMWorkflowState) -> str:
         generated_rule = state.get("generated_rule", {})
         rule_content = generated_rule.get("rule_content", "")
         existing_policy_text = state.get("existing_policy_text", "")
-        
+
         # Check if rule validation found issues
         if state.get("has_duplicate_intent"):
             return (
@@ -363,10 +365,10 @@ def _get_workflow_guidance(state: ILMWorkflowState) -> str:
                 "AGENT INSTRUCTION: WARNING - The generated rule conflicts with existing rules. "
                 "You should inform the user about the conflict and ask if they want to proceed anyway or modify the request."
             )
-        
+
         # Combine existing policy with new rule
         combined_policy = _combine_policies(existing_policy_text, rule_content)
-        
+
         return (
             f"AGENT INSTRUCTION: Rule validated successfully. Next step: test the complete policy with test_policy.\n"
             f"CRITICAL: Use this EXACT combined policy (existing rules + new rule):\n\n"
@@ -378,10 +380,10 @@ def _get_workflow_guidance(state: ILMWorkflowState) -> str:
         generated_rule = state.get("generated_rule", {})
         rule_content = generated_rule.get("rule_content", "")
         existing_policy_text = state.get("existing_policy_text", "")
-        
+
         # Combine existing policy with new rule
         combined_policy = _combine_policies(existing_policy_text, rule_content)
-        
+
         return (
             f"AGENT INSTRUCTION: Policy test passed. Ready to update with update_policy.\n"
             f"CRITICAL: Use this EXACT combined policy (all rules):\n\n"
@@ -394,7 +396,7 @@ def _get_workflow_guidance(state: ILMWorkflowState) -> str:
             "AGENT INSTRUCTION: Policy updated successfully. Final step: apply the policy with apply_policy "
             "to execute the policy rules on the filesystem."
         )
-    
+
     # Workflow completed - inform user and stop
     if step == "completed":
         return (
@@ -402,7 +404,7 @@ def _get_workflow_guidance(state: ILMWorkflowState) -> str:
             "Present the results to the user and DO NOT call any more tools. "
             "The task is finished."
         )
-    
+
     return ""
 
 
@@ -452,16 +454,18 @@ def _check_tool_error(tool_result: dict[str, Any], tool_name: str) -> tuple[bool
         field_value = str(tool_result.get(field, "")).lower()
         if field_value and any(keyword in field_value for keyword in ERROR_KEYWORDS):
             error_message = tool_result.get(field, f"Error in {tool_name}")
-            
+
             # Provide more specific context for policy validation errors
             if tool_name in ["test_policy", "update_policy"] and "400 bad request" in field_value.lower():
                 logger.warning(f"Policy validation failed for {tool_name}: {str(error_message)[:200]}")
-                logger.debug("This typically indicates incorrect policy syntax. Check the raw policy content logged above.")
+                logger.debug(
+                    "This typically indicates incorrect policy syntax. Check the raw policy content logged above."
+                )
             else:
                 logger.warning(f"Tool {tool_name} returned error in {field}: {str(error_message)[:200]}")
-            
+
             return True, str(error_message)
-    
+
     return False, None
 
 
@@ -511,14 +515,14 @@ def _process_get_policy_result(state: ILMWorkflowState, tool_result: dict[str, A
         "existing_policy": tool_result,
         "filesystem": _extract_filesystem_from_messages(state["messages"]),
     }
-    
+
     if isinstance(tool_result, dict) and "policy_contents" in tool_result:
         updates["existing_policy_text"] = tool_result["policy_contents"]
-    
+
     # Only advance workflow if in modification mode - go directly to generate_rule
     if state["workflow_step"] != "initial":
         updates["workflow_step"] = "generate_rule"
-    
+
     logger.debug(f"Policy retrieved for filesystem: {updates.get('filesystem')}")
     return updates
 
@@ -526,14 +530,14 @@ def _process_get_policy_result(state: ILMWorkflowState, tool_result: dict[str, A
 def _process_list_storage_pools_result(state: ILMWorkflowState, tool_result: dict[str, Any]) -> dict[str, Any]:
     """Process list_storage_pools tool result."""
     updates = {}
-    
+
     if isinstance(tool_result, dict) and "storage_pools" in tool_result:
         pools = tool_result["storage_pools"]
         if isinstance(pools, list):
             pool_names = [p.get("name") for p in pools if isinstance(p, dict) and p.get("name")]
             updates["storage_pools"] = pool_names
             updates["pools_verified"] = True
-            
+
             # Only advance workflow if in modification mode - move to validate_rule after pools verified
             if state["workflow_step"] != "initial":
                 updates["workflow_step"] = "validate_rule"
@@ -544,7 +548,7 @@ def _process_list_storage_pools_result(state: ILMWorkflowState, tool_result: dic
             logger.warning("Pools field is not a list - may need retry")
     else:
         logger.warning("No pools data in response - workflow staying at current step")
-    
+
     return updates
 
 
@@ -555,12 +559,12 @@ def _process_test_policy_result(state: ILMWorkflowState, tool_result: dict[str, 
         "policy_tested": True,
         "test_passed": test_passed,
     }
-    
+
     # Check if user only wanted to test (not update)
     user_request = state.get("user_request", "")
     user_request_lower = user_request.lower() if user_request else ""
     has_testing_intent = any(kw in user_request_lower for kw in TESTING_KEYWORDS)
-    
+
     # Only advance workflow if in modification mode and test passed
     if test_passed and state["workflow_step"] != "initial":
         # If user explicitly requested testing only, complete the workflow
@@ -575,24 +579,24 @@ def _process_test_policy_result(state: ILMWorkflowState, tool_result: dict[str, 
         logger.warning("Policy test FAILED")
     else:
         logger.debug("Policy test PASSED (read-only validation)")
-    
+
     return updates
 
 
 def _process_update_policy_result(state: ILMWorkflowState, tool_result: dict[str, Any]) -> dict[str, Any]:
     """Process update_policy tool result.
-    
+
     By default, after updating a policy, the workflow proceeds to apply it.
     Users can opt out by using keywords like "only", "just", or "don't apply".
     """
     if _check_success_status(tool_result):
         user_request = state.get("user_request", "")
         user_request_lower = user_request.lower() if user_request else ""
-        
+
         # Keywords that indicate user wants to skip apply
         skip_apply_keywords = ["only update", "just update", "don't apply", "do not apply", "skip apply"]
         wants_to_skip_apply = any(kw in user_request_lower for kw in skip_apply_keywords)
-        
+
         if wants_to_skip_apply:
             logger.debug("Policy updated successfully - completing workflow (skip apply intent detected)")
             return {
@@ -630,16 +634,16 @@ def _process_tool_results(state: ILMWorkflowState, result: dict[str, Any]) -> di
     messages = result.get("messages", [])
     if not messages or not isinstance(messages[-1], ToolMessage):
         return updates
-    
+
     last_message = messages[-1]
     tool_name = last_message.name
     tool_result = _parse_tool_content(last_message.content)
-    
+
     logger.debug(f"Processing tool result for: {tool_name}")
 
     # Check for errors in tool result
     is_error, error_message = _check_tool_error(tool_result, tool_name)
-    
+
     if is_error:
         return {**updates, **_handle_tool_error(tool_name, error_message, updates)}
 
@@ -656,11 +660,11 @@ def _process_tool_results(state: ILMWorkflowState, result: dict[str, Any]) -> di
         "update_policy": lambda: _process_update_policy_result(state, tool_result),
         "apply_policy": lambda: _process_apply_policy_result(tool_result),
     }
-    
+
     processor = tool_processors.get(tool_name)
     if processor:
         updates.update(processor())
-    
+
     return updates
 
 
@@ -684,25 +688,31 @@ def should_continue(state: ILMWorkflowState) -> Literal["tools", "end"]:
 
 def _get_validation_error(tool_name: str, state: ILMWorkflowState) -> str | None:
     """Get validation error message for a tool call based on workflow state.
-    
+
     Only update_policy and apply_policy trigger the modification workflow.
     Other tools (get_policy, list_storage_pools, test_policy) can be used standalone.
     """
     validation_rules = {
         "update_policy": [
-            (not state["policy_retrieved"],
-             "Cannot update policy without first retrieving existing policy. CRITICAL: Call get_policy first to preserve all existing rules."),
-            (not state["policy_tested"],
-             "Cannot update policy without testing it first. Please call test_policy to validate the policy."),
-            (not state["test_passed"],
-             "Cannot update policy because test_policy did not pass. Please fix the policy errors before updating."),
+            (
+                not state["policy_retrieved"],
+                "Cannot update policy without first retrieving existing policy. CRITICAL: Call get_policy first to preserve all existing rules.",
+            ),
+            (
+                not state["policy_tested"],
+                "Cannot update policy without testing it first. Please call test_policy to validate the policy.",
+            ),
+            (
+                not state["test_passed"],
+                "Cannot update policy because test_policy did not pass. Please fix the policy errors before updating.",
+            ),
         ],
         "apply_policy": (
             not state["policy_updated"],
-            "Cannot apply policy without updating it first. Please call update_policy to save the policy before applying."
+            "Cannot apply policy without updating it first. Please call update_policy to save the policy before applying.",
         ),
     }
-    
+
     rules = validation_rules.get(tool_name)
     if not rules:
         return None
@@ -716,11 +726,13 @@ def _get_validation_error(tool_name: str, state: ILMWorkflowState) -> str | None
     for condition, message in rules:
         if condition:
             return message
-    
+
     return None
 
 
-def _create_error_response(tool_call: dict[str, Any], tool_name: str, error: str, updates: dict[str, Any]) -> dict[str, Any]:
+def _create_error_response(
+    tool_call: dict[str, Any], tool_name: str, error: str, updates: dict[str, Any]
+) -> dict[str, Any]:
     """Create an error response for a tool call."""
     error_msg = ToolMessage(
         content=json.dumps({"status": "error", "message": error}),
@@ -732,13 +744,13 @@ def _create_error_response(tool_call: dict[str, Any], tool_name: str, error: str
 
 def _reset_workflow_if_needed(state: ILMWorkflowState) -> dict[str, Any]:
     """Reset workflow state if it was completed/cancelled and a new request comes in.
-    
+
     Returns:
         Dictionary of state updates for reset, or empty dict if no reset needed
     """
     if state["workflow_step"] not in ["completed", "cancelled"]:
         return {}
-    
+
     logger.debug(f"Resetting workflow from {state['workflow_step']} to initial for new request")
     return {
         "workflow_step": "initial",
@@ -761,21 +773,18 @@ def _reset_workflow_if_needed(state: ILMWorkflowState) -> dict[str, Any]:
 
 
 def _activate_workflow_for_rule_generation(
-    tool_call: dict[str, Any],
-    tool_name: str,
-    user_request: str,
-    updates: dict[str, Any]
+    tool_call: dict[str, Any], tool_name: str, user_request: str, updates: dict[str, Any]
 ) -> dict[str, Any] | None:
     """Activate workflow when rule generation keywords detected.
-    
+
     Returns:
         Error response dict if tool should be blocked, None if tool can proceed
     """
     has_rule_keywords = _has_intent_keywords(user_request, RULE_GENERATION_KEYWORDS)
-    
+
     if not has_rule_keywords:
         return None
-    
+
     # If rule keywords found and NOT calling get_policy, activate workflow and block
     if tool_name != "get_policy":
         logger.debug("Rule generation intent detected - activating workflow, must start with get_policy")
@@ -785,7 +794,7 @@ def _activate_workflow_for_rule_generation(
         updates["last_user_message"] = user_request
         error = f"Cannot call {tool_name} without first retrieving existing policy. CRITICAL: Call get_policy first to retrieve the existing policy, then the workflow will guide you through: list_storage_pools → generate_rule → test_policy → update_policy."
         return _create_error_response(tool_call, tool_name, error, updates)
-    
+
     # Activate workflow but allow get_policy to proceed
     logger.debug("Rule generation intent detected - activating workflow")
     updates["workflow_step"] = "get_policy"
@@ -795,13 +804,9 @@ def _activate_workflow_for_rule_generation(
     return None
 
 
-def _activate_workflow_for_modification(
-    tool_name: str,
-    messages: list[BaseMessage],
-    updates: dict[str, Any]
-) -> None:
+def _activate_workflow_for_modification(tool_name: str, messages: list[BaseMessage], updates: dict[str, Any]) -> None:
     """Activate workflow when modification tools are called.
-    
+
     Modifies updates dict in place.
     """
     logger.debug(f"Modification tool {tool_name} called - activating workflow")
@@ -814,21 +819,18 @@ def _activate_workflow_for_modification(
 
 
 def _validate_test_policy_from_initial(
-    tool_call: dict[str, Any],
-    tool_name: str,
-    user_request: str | None,
-    updates: dict[str, Any]
+    tool_call: dict[str, Any], tool_name: str, user_request: str | None, updates: dict[str, Any]
 ) -> dict[str, Any] | None:
     """Validate test_policy call from initial state.
-    
+
     Returns:
         Error response dict if tool should be blocked, None if tool can proceed
     """
     if not user_request:
         return None
-    
+
     has_rule_keywords = _has_intent_keywords(user_request, RULE_GENERATION_KEYWORDS)
-    
+
     # If rule keywords found, ALWAYS activate workflow for proper rule generation
     if has_rule_keywords:
         logger.debug("Rule generation intent detected - activating workflow to use LLM rule generator")
@@ -838,20 +840,20 @@ def _validate_test_policy_from_initial(
         updates["last_user_message"] = user_request
         error = "Cannot test policy without first retrieving existing policy and generating the new rule using the LLM. CRITICAL: Call get_policy first to retrieve the existing policy, then list_storage_pools to verify pools, and the rule will be generated automatically with correct IBM Storage Scale syntax."
         return _create_error_response(tool_call, tool_name, error, updates)
-    
+
     return None
 
 
 def validate_tool_call(state: ILMWorkflowState) -> dict[str, Any]:
     """Validate that tool calls follow the workflow sequence.
-    
+
     When modification tools are called from 'initial' state, activate the workflow.
     """
     messages = state["messages"]
     if not messages:
         logger.debug("validate_tool_call: No messages in state")
         return {}
-    
+
     last_message = messages[-1]
     if not hasattr(last_message, "tool_calls") or not last_message.tool_calls:
         logger.debug("validate_tool_call: No tool calls in last message")
@@ -859,17 +861,17 @@ def validate_tool_call(state: ILMWorkflowState) -> dict[str, Any]:
 
     # Reset workflow if needed
     updates = _reset_workflow_if_needed(state)
-    
+
     # Get current workflow step (use updated value if reset occurred)
     current_workflow_step = updates.get("workflow_step", state["workflow_step"])
-    
+
     logger.debug(f"validate_tool_call: Checking tool calls, workflow_step={current_workflow_step}")
-    
+
     # Check each tool call
     for tool_call in last_message.tool_calls:
         tool_name = tool_call.get("name")
         logger.debug(f"validate_tool_call: Processing tool '{tool_name}'")
-        
+
         # Check if workflow should be activated from initial state
         if current_workflow_step == "initial":
             user_request = _find_user_request(messages)
@@ -878,59 +880,55 @@ def validate_tool_call(state: ILMWorkflowState) -> dict[str, Any]:
                 if _is_question_not_action(user_request):
                     logger.debug("User request appears to be a question, not activating workflow")
                     continue
-                
+
                 # Try to activate workflow for rule generation
-                error_response = _activate_workflow_for_rule_generation(
-                    tool_call, tool_name, user_request, updates
-                )
+                error_response = _activate_workflow_for_rule_generation(tool_call, tool_name, user_request, updates)
                 if error_response:
                     return error_response
-        
+
         # If a modification tool is called from initial state, activate workflow and block
         if tool_name in MODIFICATION_TOOLS and current_workflow_step == "initial":
             _activate_workflow_for_modification(tool_name, messages, updates)
             # Block the modification tool - must go through workflow
             error = f"Cannot call {tool_name} without first retrieving existing policy. CRITICAL: Call get_policy first to retrieve the existing policy, then the workflow will guide you through the proper sequence."
             return _create_error_response(tool_call, tool_name, error, updates)
-        
+
         # Handle test_policy from initial state
         if tool_name == "test_policy" and current_workflow_step == "initial":
             user_request = _find_user_request(messages)
-            error_response = _validate_test_policy_from_initial(
-                tool_call, tool_name, user_request, updates
-            )
+            error_response = _validate_test_policy_from_initial(tool_call, tool_name, user_request, updates)
             if error_response:
                 return error_response
-        
+
         # Check for validation errors
         error = _get_validation_error(tool_name, state)
         if error:
             return _create_error_response(tool_call, tool_name, error, updates)
-    
+
     return updates
 
 
 def create_ilm_workflow_graph(llm, tools):
     """Create the ILM workflow graph with enforced sequencing.
-    
+
     Args:
         llm: Language model instance for agent and rule generation
         tools: List of tool instances for the workflow
 
     Returns:
         StateGraph ready to be compiled
-        
+
     Raises:
         ValueError: If tools list is empty or missing required tools
     """
     # Validate inputs
     if not tools:
         raise ValueError("Tools list cannot be empty. At least one tool must be provided.")
-    
+
     # Log available tools for debugging
-    tool_names = [getattr(tool, 'name', str(tool)) for tool in tools]
+    tool_names = [getattr(tool, "name", str(tool)) for tool in tools]
     logger.debug(f"Creating workflow graph with {len(tools)} tools: {tool_names}")
-    
+
     # Create closures that capture llm and tools
     async def agent_node_with_context(state: ILMWorkflowState) -> dict[str, Any]:
         """Agent node with captured LLM and tools."""
@@ -946,7 +944,9 @@ def create_ilm_workflow_graph(llm, tools):
             # Insert guidance as a user instruction to prompt the agent to act
             # Note: workflow_guidance is system-generated but may include sanitized user content excerpts
             sanitized_guidance = _sanitize_user_input(workflow_guidance)
-            guidance_msg = HumanMessage(content=f"{WORKFLOW_STATUS_PREFIX}\n{sanitized_guidance}\n\nPlease proceed with the next step.")
+            guidance_msg = HumanMessage(
+                content=f"{WORKFLOW_STATUS_PREFIX}\n{sanitized_guidance}\n\nPlease proceed with the next step."
+            )
             messages.append(guidance_msg)
 
         # Bind tools to LLM
@@ -954,9 +954,9 @@ def create_ilm_workflow_graph(llm, tools):
 
         # Get LLM response
         response = await llm_with_tools.ainvoke(messages)
-        
+
         return {"messages": [response]}
-    
+
     async def tool_execution_node_with_context(state: ILMWorkflowState) -> dict[str, Any]:
         """Tool execution node with captured tools."""
         tool_node = ToolNode(tools)
@@ -966,9 +966,9 @@ def create_ilm_workflow_graph(llm, tools):
 
         # Update workflow state based on tool execution
         updates = _process_tool_results(state, result)
-        
+
         return updates
-    
+
     async def generate_rule_node_with_llm(state: ILMWorkflowState) -> dict[str, Any]:
         """Node that generates ILM policy rules using LLM."""
         # Validate prerequisites
@@ -979,7 +979,7 @@ def create_ilm_workflow_graph(llm, tools):
                 "error_message": "Cannot generate rule without retrieving existing policy first",
                 "workflow_step": "get_policy",
             }
-        
+
         # Extract user request using canonical function
         user_request = state.get("user_request") or _find_user_request(state["messages"])
 
@@ -1028,7 +1028,7 @@ def create_ilm_workflow_graph(llm, tools):
             "workflow_step": "verify_pools",
             "user_request": user_request,
         }
-    
+
     async def validate_rule_node_with_llm(state: ILMWorkflowState) -> dict[str, Any]:
         """Node that validates the generated rule for duplicate or conflicting intent using LLM."""
         # Validate prerequisites
@@ -1038,11 +1038,11 @@ def create_ilm_workflow_graph(llm, tools):
                 "error_message": "Cannot validate rule - no rule has been generated",
                 "workflow_step": "generate_rule",
             }
-        
+
         generated_rule = state.get("generated_rule", {})
         rule_content = generated_rule.get("rule_content", "")
         existing_policy_text = state.get("existing_policy_text", "")
-        
+
         if not rule_content:
             logger.error("Generated rule has no content")
             return {
@@ -1050,7 +1050,7 @@ def create_ilm_workflow_graph(llm, tools):
                 "rule_validated": True,
                 "workflow_step": "test_policy",
             }
-        
+
         if not existing_policy_text:
             logger.info("No existing policy to compare against - skipping validation")
             return {
@@ -1059,7 +1059,7 @@ def create_ilm_workflow_graph(llm, tools):
                 "has_conflicting_intent": False,
                 "workflow_step": "test_policy",
             }
-        
+
         # Create prompt for LLM to analyze rule intent
         validation_prompt = f"""Analyze the following IBM Storage Scale ILM policy rules and determine if there are duplicates or conflicts.
 
@@ -1070,12 +1070,12 @@ CRITICAL DUPLICATE DETECTION RULES:
    - Same FROM POOL and TO POOL (for MIGRATE/REPLICATE)
    - Same FROM POOL (for DELETE)
    - Same or overlapping WHERE conditions (time thresholds, file patterns, etc.)
-   
+
    Examples of DUPLICATES:
    - MIGRATE FROM 'system' TO 'silver' WHERE ... > 180 days (rule A)
    - MIGRATE FROM 'system' TO 'silver' WHERE ... > 180 days (rule B)
    → These are DUPLICATES even with different rule names
-   
+
    - MIGRATE FROM 'system' TO 'silver' WHERE ... > 90 days (rule A)
    - MIGRATE FROM 'system' TO 'silver' WHERE ... > 180 days (rule B)
    → These are DUPLICATE INTENT (same pools, different thresholds)
@@ -1102,7 +1102,7 @@ Respond in JSON format:
 }}"""
 
         logger.debug("Invoking LLM for rule validation...")
-        
+
         try:
             response = await llm.ainvoke([HumanMessage(content=validation_prompt)])
             validation_text = response.content.strip()
@@ -1112,30 +1112,36 @@ Respond in JSON format:
                 validation_text = validation_text.split("```json")[1].split("```")[0].strip()
             elif "```" in validation_text:
                 validation_text = validation_text.split("```")[1].split("```")[0].strip()
-            
+
             validation_result = json.loads(validation_text)
-            
+
             has_duplicate = validation_result.get("has_duplicate_intent", False)
             has_conflict = validation_result.get("has_conflicting_intent", False)
-            
+
             logger.info(f"Rule validation complete - Duplicate: {has_duplicate}, Conflict: {has_conflict}")
-            
+
             # Create info message about validation
             validation_msg_parts = ["[Rule Validation Complete]"]
             if has_duplicate:
-                dup_explanation = validation_result.get('duplicate_explanation', 'Rule has same intent as existing rule')
+                dup_explanation = validation_result.get(
+                    "duplicate_explanation", "Rule has same intent as existing rule"
+                )
                 validation_msg_parts.append(f"WARNING - DUPLICATE INTENT DETECTED: {dup_explanation}")
                 validation_msg_parts.append("\nNOTE: The combined policy includes BOTH the existing and new rules.")
                 validation_msg_parts.append("During confirmation, you can review and modify the policy if needed.")
                 validation_msg_parts.append("To REPLACE an existing rule, remove the old rule line from the policy.")
             if has_conflict:
-                validation_msg_parts.append(f"ERROR - CONFLICTING INTENT: {validation_result.get('conflict_explanation', 'Rule conflicts with existing rules')}")
-                validation_msg_parts.append("WARNING: This may cause unexpected behavior. Review carefully before proceeding.")
+                validation_msg_parts.append(
+                    f"ERROR - CONFLICTING INTENT: {validation_result.get('conflict_explanation', 'Rule conflicts with existing rules')}"
+                )
+                validation_msg_parts.append(
+                    "WARNING: This may cause unexpected behavior. Review carefully before proceeding."
+                )
             if not has_duplicate and not has_conflict:
                 validation_msg_parts.append("PASSED: No duplicates or conflicts detected")
-            
+
             info_message = HumanMessage(content="\n".join(validation_msg_parts))
-            
+
             return {
                 "messages": [info_message],
                 "rule_validation_result": validation_result,
@@ -1144,7 +1150,7 @@ Respond in JSON format:
                 "has_conflicting_intent": has_conflict,
                 "workflow_step": "test_policy",
             }
-            
+
         except Exception as e:
             # The duplicate/conflict check is advisory; the real gates are
             # test_policy and user confirmation, so a failure here does not
@@ -1170,22 +1176,24 @@ Respond in JSON format:
                 "error_message": f"Rule validation failed: {str(e)}",
                 "workflow_step": "test_policy",
             }
-    
+
     def should_proceed_to_tools(state: ILMWorkflowState) -> Literal["tools", "agent"]:
         """Determine if we should proceed to tools or return to agent after validation.
-        
+
         If validation added an error message, return to agent to show the error.
         Otherwise, proceed to tools.
         """
         messages = state["messages"]
         if not messages:
             return "tools"
-        
+
         last_message = messages[-1]
         # If last message is a ToolMessage with an error, return to agent
         if isinstance(last_message, ToolMessage):
             try:
-                content = json.loads(last_message.content) if isinstance(last_message.content, str) else last_message.content
+                content = (
+                    json.loads(last_message.content) if isinstance(last_message.content, str) else last_message.content
+                )
                 if isinstance(content, dict) and content.get("status") == "error":
                     logger.debug("Validation returned error - returning to agent")
                     return "agent"
@@ -1195,7 +1203,7 @@ Respond in JSON format:
                 logger.debug("ToolMessage content is not JSON - treating as non-error")
 
         return "tools"
-    
+
     def should_generate_or_validate_rule(state: ILMWorkflowState) -> Literal["generate_rule", "validate_rule", "agent"]:
         """Determine if we should generate a rule, validate a rule, or continue with agent."""
         # Check if we need to generate a rule
@@ -1216,10 +1224,10 @@ Respond in JSON format:
     workflow.add_node("validate", validate_tool_call)
     workflow.add_node("generate_rule", generate_rule_node_with_llm)
     workflow.add_node("validate_rule", validate_rule_node_with_llm)
-    
+
     # Set entry point
     workflow.set_entry_point("agent")
-    
+
     # Add conditional edges
     workflow.add_conditional_edges(
         "agent",
@@ -1253,8 +1261,8 @@ Respond in JSON format:
 
     # After rule generation, go back to agent
     workflow.add_edge("generate_rule", "agent")
-    
+
     # After rule validation, go back to agent
     workflow.add_edge("validate_rule", "agent")
-    
+
     return workflow

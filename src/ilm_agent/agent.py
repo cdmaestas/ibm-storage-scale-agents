@@ -24,10 +24,7 @@ class ILMAgent:
     """Agent for managing IBM Storage Scale ILM policies."""
 
     def __init__(self, config_path: str = "config/agents_settings.ini"):
-        self.config, self.llm, self.mcp_client = load_agent_config(
-            Path(config_path),
-            "logs/agents.log"
-        )
+        self.config, self.llm, self.mcp_client = load_agent_config(Path(config_path), "logs/agents.log")
         self.agent_executor = None
         self.tools: list = []
 
@@ -50,7 +47,7 @@ class ILMAgent:
             self.tools.append(tool)
 
         memory = MemorySaver()
-        
+
         # Create custom workflow graph with enforced sequencing
         self.agent_executor = create_ilm_workflow_graph(self.llm, self.tools)
         self.agent_executor = self.agent_executor.compile(checkpointer=memory)
