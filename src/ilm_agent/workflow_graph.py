@@ -31,7 +31,7 @@ Intent Detection:
 import json
 import logging
 import re
-from typing import Annotated, Any, Dict, List, Literal, Optional, TypedDict
+from typing import Annotated, Any, Literal, TypedDict
 
 from langchain_core.messages import BaseMessage, HumanMessage, ToolMessage
 from langgraph.graph import END, StateGraph
@@ -71,27 +71,27 @@ class ILMWorkflowState(TypedDict):
     """State for ILM workflow with enforced sequencing."""
     
     # Standard message history
-    messages: Annotated[List[BaseMessage], add_messages]
+    messages: Annotated[list[BaseMessage], add_messages]
     
     # Workflow tracking
     workflow_step: str  # current step: "initial", "get_policy", "generate_rule", "verify_pools", "validate_rule", "test_policy", "update_policy", "apply_policy", "completed", "cancelled"
     workflow_active: bool  # True when workflow is actively managing a modification sequence
-    filesystem: Optional[str]
+    filesystem: str | None
     
     # Data collected during workflow
-    existing_policy: Optional[Dict[str, Any]]
-    existing_policy_text: Optional[str]
-    storage_pools: Optional[List[str]]
+    existing_policy: dict[str, Any] | None
+    existing_policy_text: str | None
+    storage_pools: list[str] | None
     
     # Rule generation data
-    user_request: Optional[str]  # Original user request for rule generation
-    target_pool: Optional[str]  # Target pool for migration
-    source_pool: Optional[str]  # Source pool (optional)
-    generated_rule: Optional[Dict[str, Any]]  # Generated rule with metadata
-    rule_generation_error: Optional[str]  # Error during rule generation
+    user_request: str | None  # Original user request for rule generation
+    target_pool: str | None  # Target pool for migration
+    source_pool: str | None  # Source pool (optional)
+    generated_rule: dict[str, Any] | None  # Generated rule with metadata
+    rule_generation_error: str | None  # Error during rule generation
 
     # Rule validation data
-    rule_validation_result: Optional[Dict[str, Any]]  # Result of LLM-based rule validation
+    rule_validation_result: dict[str, Any] | None  # Result of LLM-based rule validation
     has_duplicate_intent: bool  # True if rule duplicates existing rule intent
     has_conflicting_intent: bool  # True if rule conflicts with existing rules
 
@@ -105,10 +105,10 @@ class ILMWorkflowState(TypedDict):
     policy_updated: bool
     
     # Error tracking
-    error_message: Optional[str]
+    error_message: str | None
     
     # Performance cache - last user message to avoid repeated traversal
-    last_user_message: Optional[str]
+    last_user_message: str | None
 
 
 def create_initial_state() -> ILMWorkflowState:
@@ -187,7 +187,7 @@ def _sanitize_user_input(text: str) -> str:
     return text.strip()
 
 
-def _find_user_request(messages: List[BaseMessage]) -> Optional[str]:
+def _find_user_request(messages: list[BaseMessage]) -> str | None:
     """Extract the most recent user request from messages.
     
     This is the canonical implementation used throughout the workflow.
@@ -231,7 +231,7 @@ def _is_question_not_action(user_request: str) -> bool:
     return False
 
 
-def _has_intent_keywords(text: str, keywords: List[str]) -> bool:
+def _has_intent_keywords(text: str, keywords: list[str]) -> bool:
     """Check if text contains any of the intent keywords using word boundary matching.
     
     Uses regex word boundaries to avoid false positives from substrings.
@@ -406,7 +406,7 @@ def _get_workflow_guidance(state: ILMWorkflowState) -> str:
     return ""
 
 
-def _parse_tool_content(tool_content: Any) -> Dict[str, Any]:
+def _parse_tool_content(tool_content: Any) -> dict[str, Any]:
     """Parse tool content into a dictionary.
 
     Args:
@@ -426,7 +426,7 @@ def _parse_tool_content(tool_content: Any) -> Dict[str, Any]:
     return tool_content
 
 
-def _check_tool_error(tool_result: Dict[str, Any], tool_name: str) -> tuple[bool, Optional[str]]:
+def _check_tool_error(tool_result: dict[str, Any], tool_name: str) -> tuple[bool, str | None]:
     """Check if tool result contains an error.
 
     Detects errors from multiple sources by checking for common error keywords
@@ -481,7 +481,7 @@ def _check_success_status(tool_result: Any) -> bool:
     return not any(keyword in result_str for keyword in ERROR_KEYWORDS)
 
 
-def _extract_filesystem_from_messages(messages: List[BaseMessage]) -> Optional[str]:
+def _extract_filesystem_from_messages(messages: list[BaseMessage]) -> str | None:
     """Extract filesystem parameter from tool calls in messages."""
     for msg in reversed(messages):
         if hasattr(msg, "tool_calls") and msg.tool_calls:
@@ -491,7 +491,7 @@ def _extract_filesystem_from_messages(messages: List[BaseMessage]) -> Optional[s
     return None
 
 
-def _handle_tool_error(tool_name: str, error_message: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+def _handle_tool_error(tool_name: str, error_message: str, updates: dict[str, Any]) -> dict[str, Any]:
     """Handle tool execution errors."""
     if "cancelled" in str(error_message).lower():
         logger.warning(f"User cancelled {tool_name} - marking workflow as cancelled")
@@ -504,7 +504,7 @@ def _handle_tool_error(tool_name: str, error_message: str, updates: Dict[str, An
     return updates
 
 
-def _process_get_policy_result(state: ILMWorkflowState, tool_result: Dict[str, Any]) -> Dict[str, Any]:
+def _process_get_policy_result(state: ILMWorkflowState, tool_result: dict[str, Any]) -> dict[str, Any]:
     """Process get_policy tool result."""
     updates = {
         "policy_retrieved": True,
@@ -523,7 +523,7 @@ def _process_get_policy_result(state: ILMWorkflowState, tool_result: Dict[str, A
     return updates
 
 
-def _process_list_storage_pools_result(state: ILMWorkflowState, tool_result: Dict[str, Any]) -> Dict[str, Any]:
+def _process_list_storage_pools_result(state: ILMWorkflowState, tool_result: dict[str, Any]) -> dict[str, Any]:
     """Process list_storage_pools tool result."""
     updates = {}
     
@@ -548,7 +548,7 @@ def _process_list_storage_pools_result(state: ILMWorkflowState, tool_result: Dic
     return updates
 
 
-def _process_test_policy_result(state: ILMWorkflowState, tool_result: Dict[str, Any]) -> Dict[str, Any]:
+def _process_test_policy_result(state: ILMWorkflowState, tool_result: dict[str, Any]) -> dict[str, Any]:
     """Process test_policy tool result."""
     test_passed = _check_success_status(tool_result)
     updates = {
@@ -579,7 +579,7 @@ def _process_test_policy_result(state: ILMWorkflowState, tool_result: Dict[str, 
     return updates
 
 
-def _process_update_policy_result(state: ILMWorkflowState, tool_result: Dict[str, Any]) -> Dict[str, Any]:
+def _process_update_policy_result(state: ILMWorkflowState, tool_result: dict[str, Any]) -> dict[str, Any]:
     """Process update_policy tool result.
     
     By default, after updating a policy, the workflow proceeds to apply it.
@@ -610,7 +610,7 @@ def _process_update_policy_result(state: ILMWorkflowState, tool_result: Dict[str
         return {}
 
 
-def _process_apply_policy_result(tool_result: Dict[str, Any]) -> Dict[str, Any]:
+def _process_apply_policy_result(tool_result: dict[str, Any]) -> dict[str, Any]:
     """Process apply_policy tool result."""
     if _check_success_status(tool_result):
         logger.info("Policy applied successfully - workflow complete")
@@ -618,7 +618,7 @@ def _process_apply_policy_result(tool_result: Dict[str, Any]) -> Dict[str, Any]:
     return {}
 
 
-def _process_tool_results(state: ILMWorkflowState, result: Dict[str, Any]) -> Dict[str, Any]:
+def _process_tool_results(state: ILMWorkflowState, result: dict[str, Any]) -> dict[str, Any]:
     """Process tool execution results and update workflow state.
 
     Handles both successful results and errors, allowing the agent to see errors
@@ -682,7 +682,7 @@ def should_continue(state: ILMWorkflowState) -> Literal["tools", "end"]:
     return "end"
 
 
-def _get_validation_error(tool_name: str, state: ILMWorkflowState) -> Optional[str]:
+def _get_validation_error(tool_name: str, state: ILMWorkflowState) -> str | None:
     """Get validation error message for a tool call based on workflow state.
     
     Only update_policy and apply_policy trigger the modification workflow.
@@ -720,7 +720,7 @@ def _get_validation_error(tool_name: str, state: ILMWorkflowState) -> Optional[s
     return None
 
 
-def _create_error_response(tool_call: Dict[str, Any], tool_name: str, error: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+def _create_error_response(tool_call: dict[str, Any], tool_name: str, error: str, updates: dict[str, Any]) -> dict[str, Any]:
     """Create an error response for a tool call."""
     error_msg = ToolMessage(
         content=json.dumps({"status": "error", "message": error}),
@@ -730,7 +730,7 @@ def _create_error_response(tool_call: Dict[str, Any], tool_name: str, error: str
     return {"messages": [error_msg], "error_message": error, **updates}
 
 
-def _reset_workflow_if_needed(state: ILMWorkflowState) -> Dict[str, Any]:
+def _reset_workflow_if_needed(state: ILMWorkflowState) -> dict[str, Any]:
     """Reset workflow state if it was completed/cancelled and a new request comes in.
     
     Returns:
@@ -761,11 +761,11 @@ def _reset_workflow_if_needed(state: ILMWorkflowState) -> Dict[str, Any]:
 
 
 def _activate_workflow_for_rule_generation(
-    tool_call: Dict[str, Any],
+    tool_call: dict[str, Any],
     tool_name: str,
     user_request: str,
-    updates: Dict[str, Any]
-) -> Optional[Dict[str, Any]]:
+    updates: dict[str, Any]
+) -> dict[str, Any] | None:
     """Activate workflow when rule generation keywords detected.
     
     Returns:
@@ -797,8 +797,8 @@ def _activate_workflow_for_rule_generation(
 
 def _activate_workflow_for_modification(
     tool_name: str,
-    messages: List[BaseMessage],
-    updates: Dict[str, Any]
+    messages: list[BaseMessage],
+    updates: dict[str, Any]
 ) -> None:
     """Activate workflow when modification tools are called.
     
@@ -814,11 +814,11 @@ def _activate_workflow_for_modification(
 
 
 def _validate_test_policy_from_initial(
-    tool_call: Dict[str, Any],
+    tool_call: dict[str, Any],
     tool_name: str,
-    user_request: Optional[str],
-    updates: Dict[str, Any]
-) -> Optional[Dict[str, Any]]:
+    user_request: str | None,
+    updates: dict[str, Any]
+) -> dict[str, Any] | None:
     """Validate test_policy call from initial state.
     
     Returns:
@@ -842,7 +842,7 @@ def _validate_test_policy_from_initial(
     return None
 
 
-def validate_tool_call(state: ILMWorkflowState) -> Dict[str, Any]:
+def validate_tool_call(state: ILMWorkflowState) -> dict[str, Any]:
     """Validate that tool calls follow the workflow sequence.
     
     When modification tools are called from 'initial' state, activate the workflow.
@@ -932,7 +932,7 @@ def create_ilm_workflow_graph(llm, tools):
     logger.debug(f"Creating workflow graph with {len(tools)} tools: {tool_names}")
     
     # Create closures that capture llm and tools
-    async def agent_node_with_context(state: ILMWorkflowState) -> Dict[str, Any]:
+    async def agent_node_with_context(state: ILMWorkflowState) -> dict[str, Any]:
         """Agent node with captured LLM and tools."""
         # Build context-aware system message based on workflow state
         workflow_guidance = _get_workflow_guidance(state)
@@ -957,7 +957,7 @@ def create_ilm_workflow_graph(llm, tools):
         
         return {"messages": [response]}
     
-    async def tool_execution_node_with_context(state: ILMWorkflowState) -> Dict[str, Any]:
+    async def tool_execution_node_with_context(state: ILMWorkflowState) -> dict[str, Any]:
         """Tool execution node with captured tools."""
         tool_node = ToolNode(tools)
 
@@ -969,7 +969,7 @@ def create_ilm_workflow_graph(llm, tools):
         
         return updates
     
-    async def generate_rule_node_with_llm(state: ILMWorkflowState) -> Dict[str, Any]:
+    async def generate_rule_node_with_llm(state: ILMWorkflowState) -> dict[str, Any]:
         """Node that generates ILM policy rules using LLM."""
         # Validate prerequisites
         if not state.get("policy_retrieved"):
@@ -1029,7 +1029,7 @@ def create_ilm_workflow_graph(llm, tools):
             "user_request": user_request,
         }
     
-    async def validate_rule_node_with_llm(state: ILMWorkflowState) -> Dict[str, Any]:
+    async def validate_rule_node_with_llm(state: ILMWorkflowState) -> dict[str, Any]:
         """Node that validates the generated rule for duplicate or conflicting intent using LLM."""
         # Validate prerequisites
         if not state.get("rule_generated"):

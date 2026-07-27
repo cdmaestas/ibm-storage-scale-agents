@@ -8,7 +8,7 @@ import logging
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Type
+from typing import Any
 
 import httpx
 from langchain_core.tools import StructuredTool
@@ -97,7 +97,7 @@ def process_policy_contents(tool_name: str, filtered_kwargs: dict, logger: loggi
     filtered_kwargs["policy_contents"] = encoded
 
 
-def filter_tool_kwargs(kwargs: Dict[str, Any]) -> Dict[str, Any]:
+def filter_tool_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
     """Filter out None and LLM-generated placeholder strings for optional parameters.
     
     Some LLMs may generate '<nil>', 'null', etc. instead of omitting optional params.
@@ -119,7 +119,7 @@ def filter_tool_kwargs(kwargs: Dict[str, Any]) -> Dict[str, Any]:
     return filtered
 
 
-def create_tool_input_model(tool_name: str, args_config: Dict[str, Any]) -> Type[BaseModel]:
+def create_tool_input_model(tool_name: str, args_config: dict[str, Any]) -> type[BaseModel]:
     """Dynamically create a Pydantic model for a tool's input schema.
     
     Args:
@@ -138,7 +138,7 @@ def create_tool_input_model(tool_name: str, args_config: Dict[str, Any]) -> Type
         is_optional = arg_config.get("optional", False)
 
         if is_optional:
-            annotations[arg_name] = Optional[arg_type]
+            annotations[arg_name] = arg_type | None
             fields[arg_name] = Field(default=None, description=arg_desc)
         else:
             annotations[arg_name] = arg_type
@@ -249,7 +249,7 @@ class MCPClient:
         self._session_id = None
         self.logger = logging.getLogger(__name__)
 
-    def _parse_sse_response(self, text: str) -> Dict[str, Any]:
+    def _parse_sse_response(self, text: str) -> dict[str, Any]:
         """Parse Server-Sent Events response format.
 
         Args:
@@ -312,7 +312,7 @@ class MCPClient:
         # Update client headers with session ID
         self.client.headers["mcp-session-id"] = self._session_id
 
-    async def list_tools(self) -> List[Dict[str, Any]]:
+    async def list_tools(self) -> list[dict[str, Any]]:
         """List all available tools from MCP server.
 
         Returns:
@@ -336,7 +336,7 @@ class MCPClient:
             return self._tools_cache
         return []
 
-    async def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
+    async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> Any:
         """Call a tool on the MCP server.
 
         Args:
@@ -480,7 +480,7 @@ def create_mcp_client(mcp_config: configparser.SectionProxy) -> MCPClient:
 async def _execute_tool_with_semaphore(
     tool_name: str,
     mcp_client: MCPClient,
-    filtered_kwargs: Dict[str, Any],
+    filtered_kwargs: dict[str, Any],
     logger: logging.Logger,
     require_confirmation: bool = True
 ) -> str:

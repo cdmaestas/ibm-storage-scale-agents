@@ -2,7 +2,6 @@
 
 import logging
 from pathlib import Path
-from typing import List
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.prebuilt import create_react_agent
@@ -33,7 +32,7 @@ class ProvisioningAgent:
 
 
         self.agent_executor = None
-        self.tools: List = []
+        self.tools: list = []
 
     async def initialize(self):
         """Initialize the agent and connect to MCP server."""

@@ -3,7 +3,7 @@
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import StructuredTool
@@ -30,7 +30,7 @@ class OrchestratorAgent:
     def __init__(
         self,
         config_path: str = "config/agents_settings.ini",
-        agent_registry: Optional[Dict[str, Any]] = None,
+        agent_registry: dict[str, Any] | None = None,
     ):
         """Initialize orchestrator agent.
         
@@ -42,10 +42,10 @@ class OrchestratorAgent:
             Path(config_path), "logs/agents.log"
         )
         self.agent_executor = None
-        self.tools: List = []
+        self.tools: list = []
         self.agent_registry = agent_registry or {}
 
-    def set_agent_registry(self, agent_registry: Dict[str, Any]):
+    def set_agent_registry(self, agent_registry: dict[str, Any]):
         """Set the agent registry after initialization.
         
         Args:

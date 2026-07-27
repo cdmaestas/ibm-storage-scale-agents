@@ -3,7 +3,7 @@
 import logging
 import re
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from langchain_core.messages import HumanMessage
 
@@ -29,10 +29,10 @@ def _load_syntax_documentation() -> str:
 async def generate_ilm_rule_with_llm(
     llm,
     user_request: str,
-    storage_pools: List[str],
+    storage_pools: list[str],
     existing_policy_text: str,
     filesystem: str = "unknown",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Generate ILM policy rule using LLM.
     
     Args:
