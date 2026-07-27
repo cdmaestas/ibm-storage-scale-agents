@@ -16,7 +16,7 @@ Built with LangChain and LangGraph, the agents integrate with the IBM Storage Sc
 
 - Python 3.12 or higher
 - [IBM Storage Scale MCP Server](https://github.com/IBM/ibm-storage-scale-mcp-server) running and accessible
-- Ollama with a compatible model (default: qwen3:latest)
+- An LLM backend — any one of: Ollama (default), an OpenAI-compatible server (vLLM, LM Studio, …), OpenAI, Anthropic, Azure OpenAI, or AWS Bedrock. See [Connect your LLM](#connect-your-llm).
 
 ## Installation
 
@@ -36,15 +36,101 @@ Or using pip:
 pip install -e .
 ```
 
+The base install supports **Ollama** out of the box. Other LLM providers are optional extras — install only what you need:
+
+```bash
+uv sync --extra openai      # OpenAI, vLLM, LM Studio, llama.cpp, Together, Groq (+ Azure)
+uv sync --extra anthropic   # Anthropic Claude
+uv sync --extra aws         # AWS Bedrock
+# pip equivalent: pip install 'scale-agents[openai]'
+```
+
 ## Configuration
 
-Edit [`config/agents_settings.ini`](config/agents_settings.ini) to configure the agent:
+Edit [`config/agents_settings.ini`](config/agents_settings.ini) to configure the agent.
 
-### LLM Configuration
+### Connect your LLM
+
+Select a backend with the `provider` key in the `[llm]` section. One `openai` provider covers every OpenAI-compatible server (OpenAI, vLLM, LM Studio, llama.cpp, Together, Groq, …).
+
+| Provider | Extra needed | Typical config |
+|----------|--------------|----------------|
+| `ollama` | _(built in)_ | `base_url` (default `http://localhost:11434`) |
+| `openai` | `openai` | `base_url` + API key (for vLLM etc., key is optional) |
+| `anthropic` | `anthropic` | API key |
+| `azure` | `openai` | `base_url` (endpoint) + `azure_api_version` + API key |
+| `bedrock` | `aws` | `aws_region` + standard AWS credentials |
+
+**API keys are read from the environment only** — never put them in the INI. Any setting can also be overridden by an environment variable named `SCALE_AGENTS_LLM_<KEY>`, which is what makes containerized/remote deployment easy.
+
+**Local Ollama** (default):
 ```ini
 [llm]
-model_name = ollama_chat/qwen3:latest
+provider = ollama
+model_name = qwen3:latest
+base_url = http://localhost:11434
 ```
+
+**Remote Ollama** — just point `base_url` at the host:
+```ini
+[llm]
+provider = ollama
+model_name = qwen3:latest
+base_url = http://gpu-box.example.com:11434
+```
+
+**vLLM / any OpenAI-compatible server** (`uv sync --extra openai`):
+```ini
+[llm]
+provider = openai
+model_name = Qwen/Qwen2.5-7B-Instruct
+base_url = http://vllm-host:8000/v1
+```
+```bash
+export SCALE_AGENTS_LLM_API_KEY=...   # vLLM usually accepts any/empty value
+```
+
+**OpenAI** (`uv sync --extra openai`):
+```ini
+[llm]
+provider = openai
+model_name = gpt-4o
+```
+```bash
+export SCALE_AGENTS_LLM_API_KEY=sk-...   # or OPENAI_API_KEY
+```
+
+**Anthropic** (`uv sync --extra anthropic`):
+```ini
+[llm]
+provider = anthropic
+model_name = <your-claude-model-id>
+```
+```bash
+export SCALE_AGENTS_LLM_API_KEY=...   # or ANTHROPIC_API_KEY
+```
+
+**Azure OpenAI** (`uv sync --extra openai`):
+```ini
+[llm]
+provider = azure
+model_name = my-deployment-name
+base_url = https://my-resource.openai.azure.com
+azure_api_version = 2024-06-01
+```
+```bash
+export SCALE_AGENTS_LLM_API_KEY=...   # or AZURE_OPENAI_API_KEY
+```
+
+**AWS Bedrock** (`uv sync --extra aws`, uses the standard AWS credential chain):
+```ini
+[llm]
+provider = bedrock
+model_name = anthropic.claude-3-5-sonnet-20240620-v1:0
+aws_region = us-east-1
+```
+
+> Existing configs using the legacy `model_name = ollama_chat/qwen3:latest` prefix continue to work unchanged.
 
 ### MCP Server Configuration
 

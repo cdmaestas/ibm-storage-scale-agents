@@ -11,6 +11,17 @@ dependencies = [
     "httpx>=0.28.1",
 ]
 
+[project.optional-dependencies]
+openai = [
+    "langchain-openai>=1.0",
+]
+anthropic = [
+    "langchain-anthropic>=1.0",
+]
+aws = [
+    "langchain-aws>=1.0",
+]
+
 [tool.ruff]
 line-length = 120
 target-version = "py312"

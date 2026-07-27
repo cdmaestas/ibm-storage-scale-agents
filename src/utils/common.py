@@ -13,11 +13,11 @@ from typing import Any
 
 import httpx
 from langchain_core.tools import StructuredTool
-from langchain_ollama import ChatOllama
 from langgraph.types import interrupt
 from pydantic import BaseModel, Field
 
 from src.utils.constants import SEPARATOR_LINE, TOOL_CONFIGS
+from src.utils.llm_factory import build_llm
 
 # Null placeholder strings that LLMs may generate for optional parameters
 NULL_PLACEHOLDERS = ("<nil>", "null", "NULL", "<null>", "nil", "")
@@ -427,10 +427,6 @@ def load_agent_config(config_path: Path, default_log_path: str = "logs/agents.lo
         if section not in config:
             raise ValueError(f"Missing required section [{section}] in config file")
 
-    # Validate required keys
-    if "model_name" not in config["llm"]:
-        raise ValueError("Missing 'model_name' in [llm] section")
-
     # Validate MCP configuration based on transport
     transport = config["mcp"].get("transport", "http").lower()
     if transport in ("sse", "http") and "url" not in config["mcp"]:
@@ -439,13 +435,12 @@ def load_agent_config(config_path: Path, default_log_path: str = "logs/agents.lo
     # Setup logging using shared log_path from config
     setup_agent_logging(config, default_log_path)
 
-    llm_config = config["llm"]
     mcp_config = config["mcp"]
 
-    model_name = llm_config["model_name"].replace("ollama_chat/", "")
-    llm_timeout = float(llm_config.get("timeout", "60.0"))
-
-    llm = ChatOllama(model=model_name, temperature=0, verbose=True, timeout=llm_timeout)
+    # Build the chat model from the [llm] section. Provider selection, endpoint,
+    # and credentials (env-only) are all resolved inside the factory, which also
+    # validates that model_name is present. See src/utils/llm_factory.py.
+    llm = build_llm(config["llm"])
     mcp_client = create_mcp_client(mcp_config)
 
     return config, llm, mcp_client
