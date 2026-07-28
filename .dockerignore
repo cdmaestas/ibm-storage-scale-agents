@@ -1,0 +1,14 @@
+# Keep the build context small and free of local/venv state.
+.git
+.github
+.venv
+.venv-tools
+__pycache__
+*.py[oc]
+.ruff_cache
+logs
+*.egg-info
+build
+dist
+wheels
+.env

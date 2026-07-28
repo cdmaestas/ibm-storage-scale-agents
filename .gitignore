@@ -17,3 +17,6 @@ logs/
 
 # Tooling venv (hardening pass)
 .venv-tools/
+
+# Local env (secrets) — use .env.example as template
+.env

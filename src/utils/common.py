@@ -5,6 +5,7 @@ import base64
 import configparser
 import json
 import logging
+import os
 import re
 import sys
 from logging.handlers import RotatingFileHandler
@@ -426,6 +427,16 @@ def load_agent_config(config_path: Path, default_log_path: str = "logs/agents.lo
     for section in required_sections:
         if section not in config:
             raise ValueError(f"Missing required section [{section}] in config file")
+
+    # Apply environment overrides for the MCP connection so a deployment can be
+    # configured entirely via env (mirrors the SCALE_AGENTS_LLM_* overrides the
+    # LLM factory applies). env > INI.
+    mcp_url_env = os.environ.get("SCALE_AGENTS_MCP_URL")
+    if mcp_url_env:
+        config["mcp"]["url"] = mcp_url_env
+    mcp_transport_env = os.environ.get("SCALE_AGENTS_MCP_TRANSPORT")
+    if mcp_transport_env:
+        config["mcp"]["transport"] = mcp_transport_env
 
     # Validate MCP configuration based on transport
     transport = config["mcp"].get("transport", "http").lower()

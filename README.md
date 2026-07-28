@@ -182,6 +182,37 @@ Or using uv:
 uv run python main.py
 ```
 
+### Run with Docker
+
+The agents can run in a container, configured entirely through environment variables (no file editing required). Copy the env template and adjust it:
+
+```bash
+cp .env.example .env
+# edit .env: pick your provider, model, base_url, and MCP server URL
+```
+
+Run the interactive CLI against an LLM and MCP server you already have:
+
+```bash
+docker compose run --rm agent
+```
+
+To also spin up a local Ollama alongside the agent, enable the `ollama` profile:
+
+```bash
+docker compose --profile ollama up -d ollama
+docker compose --profile ollama exec ollama ollama pull qwen3:latest
+docker compose --profile ollama run --rm agent
+```
+
+To bake in a non-Ollama provider, set the extras at build time:
+
+```bash
+SCALE_AGENTS_EXTRAS="--extra openai" docker compose build agent
+```
+
+> The IBM Storage Scale MCP server runs separately. Point `SCALE_AGENTS_MCP_URL` at it — use `http://host.docker.internal:8000/mcp` when it runs on the Docker host.
+
 ## Development
 
 This project uses [ruff](https://docs.astral.sh/ruff/) for linting and formatting and [pre-commit](https://pre-commit.com/) to run checks automatically.
