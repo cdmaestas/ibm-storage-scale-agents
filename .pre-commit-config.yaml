@@ -29,7 +29,9 @@ repos:
       # import smoke test is the fullest correctness gate available).
       - id: import-smoke-test
         name: import smoke test
-        entry: uv run python -c "import main, src.utils.common, src.ilm_agent.workflow_graph, src.ilm_agent.rule_generator, src.orchestrator_agent.agent, src.provisioning_agent.agent"
+        # --no-sync: use the already-synced project venv; never re-resolve
+        # dependencies during a push (that can block on locks/network).
+        entry: uv run --no-sync python -c "import main, src.utils.common, src.ilm_agent.workflow_graph, src.ilm_agent.rule_generator, src.orchestrator_agent.agent, src.provisioning_agent.agent"
         language: system
         pass_filenames: false
         stages: [pre-push]
