@@ -213,6 +213,22 @@ SCALE_AGENTS_EXTRAS="--extra openai" docker compose build agent
 
 > The IBM Storage Scale MCP server runs separately. Point `SCALE_AGENTS_MCP_URL` at it — use `http://host.docker.internal:8000/mcp` when it runs on the Docker host.
 
+### Health check
+
+Verify LLM and MCP connectivity without starting an interactive session. It lists the MCP server's tools and makes one minimal LLM request, prints a PASS/FAIL line per check, and exits `0`/`1`:
+
+```bash
+python main.py --healthcheck              # or: uv run python main.py --healthcheck
+docker compose run --rm agent --healthcheck
+```
+
+Example output:
+```
+[healthcheck] MCP (http://127.0.0.1:8000/mcp): OK — 14 tools
+[healthcheck] LLM (qwen3:latest): OK — responded 'OK'
+[healthcheck] PASS
+```
+
 ## Development
 
 This project uses [ruff](https://docs.astral.sh/ruff/) for linting and formatting and [pre-commit](https://pre-commit.com/) to run checks automatically.

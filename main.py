@@ -1,8 +1,11 @@
 """Main entry point for IBM Storage Scale Agents."""
 
+import argparse
 import asyncio
 import json
 import logging
+import sys
+from pathlib import Path
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.types import Command
@@ -11,6 +14,7 @@ from src.ilm_agent.agent import ILMAgent
 from src.ilm_agent.workflow_graph import create_initial_state
 from src.orchestrator_agent.agent import OrchestratorAgent
 from src.provisioning_agent.agent import ProvisioningAgent
+from src.utils.common import load_agent_config
 from src.utils.constants import (
     AGENT_TYPE_ILM,
     AGENT_TYPE_ORCHESTRATOR,
@@ -20,6 +24,8 @@ from src.utils.constants import (
     PROVISIONING_ROUTING_KEYWORDS,
     SEPARATOR_LINE,
 )
+
+DEFAULT_CONFIG_PATH = "config/agents_settings.ini"
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +158,50 @@ async def run_agent(agent, user_input: str, config: dict, first_turn: bool = Fal
                 break
 
 
+async def run_healthcheck(config_path: str = DEFAULT_CONFIG_PATH) -> int:
+    """Verify the LLM and MCP server are reachable, then exit.
+
+    Performs a non-interactive self-test suitable for container healthchecks
+    and CI: it loads the configuration, lists the MCP server's tools, and makes
+    one minimal LLM request. Prints a PASS/FAIL line per check.
+
+    Returns:
+        0 if every check passed, 1 otherwise.
+    """
+    print(f"[healthcheck] config: {config_path}")
+    ok = True
+
+    try:
+        _config, llm, mcp_client = load_agent_config(Path(config_path))
+    except Exception as e:
+        print(f"[healthcheck] config load: FAIL — {e}")
+        return 1
+
+    # MCP connectivity: open a session and list the available tools.
+    try:
+        await mcp_client._ensure_session()
+        tools = await mcp_client.list_tools()
+        print(f"[healthcheck] MCP ({mcp_client.base_url}): OK — {len(tools)} tools")
+    except Exception as e:
+        print(f"[healthcheck] MCP ({mcp_client.base_url}): FAIL — {e}")
+        ok = False
+
+    # LLM connectivity: one minimal round-trip through the configured provider.
+    try:
+        response = await llm.ainvoke([HumanMessage(content="ping")])
+        model = getattr(llm, "model", getattr(llm, "model_name", type(llm).__name__))
+        preview = str(response.content).strip().replace("\n", " ")[:40]
+        print(f"[healthcheck] LLM ({model}): OK — responded '{preview}'")
+    except Exception as e:
+        print(f"[healthcheck] LLM: FAIL — {e}")
+        ok = False
+
+    await mcp_client.cleanup()
+
+    print(f"[healthcheck] {'PASS' if ok else 'FAIL'}")
+    return 0 if ok else 1
+
+
 async def main():
     """Run interactive session with agent routing and orchestration."""
     print("IBM Storage Scale Intelligent Agent System")
@@ -221,8 +271,30 @@ async def main():
                 logger.exception("Error in main loop")
 
 
+def _parse_args(argv=None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="scale-agents",
+        description="IBM Storage Scale Intelligent Agent System",
+    )
+    parser.add_argument(
+        "--healthcheck",
+        action="store_true",
+        help="Verify LLM and MCP connectivity (one minimal LLM request), print "
+        "PASS/FAIL, and exit 0/1 without starting the interactive session.",
+    )
+    parser.add_argument(
+        "--config",
+        default=DEFAULT_CONFIG_PATH,
+        help=f"Path to the agents settings INI (default: {DEFAULT_CONFIG_PATH}).",
+    )
+    return parser.parse_args(argv)
+
+
 if __name__ == "__main__":
+    args = _parse_args()
     try:
+        if args.healthcheck:
+            sys.exit(asyncio.run(run_healthcheck(args.config)))
         asyncio.run(main())
     except KeyboardInterrupt:
         pass
